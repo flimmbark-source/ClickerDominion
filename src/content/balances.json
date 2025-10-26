@@ -1,0 +1,28 @@
+{
+  "run": {
+    "baseIncomePerSec": {
+      "valor": 3,
+      "arcana": 3,
+      "gold": 3,
+      "essence": 3,
+      "evil": 3,
+      "corruption": 1
+    },
+    "victoryTrack": {
+      "townSaved": 0.02,
+      "shrineChanneled": 0.04,
+      "castleDown": 0.1,
+      "townLost": -0.03,
+      "shrineCorrupted": -0.05,
+      "heroDown": -0.12
+    },
+    "runLengthSeconds": 600,
+    "aiDecisionPeriodSec": 5
+  },
+  "costs": {
+    "hero.knight.t1": { "base": 50, "curve": "exp", "k": 1.35 },
+    "hero.witch.t1": { "base": 50, "curve": "exp", "k": 1.35 },
+    "ai.tech.t1": { "base": 60, "curve": "exp", "k": 1.3 }
+  },
+  "caps": { "echoes": 8, "auraRadius": 120 }
+}
