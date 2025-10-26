@@ -1,0 +1,16 @@
+[
+  {
+    "id": "scout.opener",
+    "phase": "early",
+    "weight": 3,
+    "effects": [{ "kind": "add", "target": "ai.scoutPower", "value": 1 }],
+    "cost": { "evil": 60 }
+  },
+  {
+    "id": "corrupt.flow",
+    "phase": "mid",
+    "weight": 2,
+    "effects": [{ "kind": "mult", "target": "income.corruption", "value": 1.4 }],
+    "cost": { "evil": 90 }
+  }
+]
