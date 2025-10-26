@@ -18,11 +18,11 @@ export function RunScreen({ onExit }: { onExit: () => void }) {
   useTicker(50, (dt) => tick(dt));
 
   return (
-    <div className="flex flex-col h-full">
+    <div className="flex h-full min-h-0 flex-col">
       {/* HUD */}
-      <div className="flex items-center justify-between p-3 bg-gray-900">
-        <div className="text-sm flex gap-4">
-          <span>⏱ {timeLeft.toFixed(1)}s</span>
+      <div className="flex flex-col gap-3 border-b border-gray-800 bg-gray-900 p-3 sm:flex-row sm:items-center sm:justify-between">
+        <div className="flex flex-wrap gap-x-4 gap-y-2 text-xs sm:text-sm">
+          <span className="font-medium">⏱ {timeLeft.toFixed(1)}s</span>
           <span>Track: {(100 * (1 - track)).toFixed(0)}% Hero</span>
           <span>Valor: {resources.valor.toFixed(1)}</span>
           <span>Arcana: {resources.arcana.toFixed(1)}</span>
@@ -30,7 +30,7 @@ export function RunScreen({ onExit }: { onExit: () => void }) {
           <span>Essence: {resources.essence.toFixed(1)}</span>
         </div>
         <button
-          className="px-3 py-1 rounded bg-slate-700 hover:bg-slate-600"
+          className="w-full rounded bg-slate-700 px-3 py-2 text-sm font-medium hover:bg-slate-600 sm:w-auto"
           onClick={onExit}
         >
           Exit
@@ -38,17 +38,19 @@ export function RunScreen({ onExit }: { onExit: () => void }) {
       </div>
 
       {/* Board */}
-      <div className="flex-1">
-        <Stage>
-          <BoardView />
-        </Stage>
+      <div className="flex-1 min-h-0 px-2 pb-2 pt-3 sm:px-4">
+        <div className="flex h-full w-full items-center justify-center overflow-hidden rounded-lg border border-gray-800 bg-gray-950">
+          <Stage>
+            <BoardView />
+          </Stage>
+        </div>
       </div>
 
       {/* Instructions */}
-      <div className="p-3 bg-gray-900 text-sm text-slate-300">
-        Click a <span className="text-green-400">TOWN</span> to capture it.
-        Hold mouse on a <span className="text-purple-400">SHRINE</span> to
-        channel it and earn rewards + track push.
+      <div className="bg-gray-900 px-3 py-4 text-xs text-slate-300 sm:text-sm">
+        Tap a <span className="text-green-400">TOWN</span> to capture it.
+        Hold on a <span className="text-purple-400">SHRINE</span> to channel and
+        earn rewards while pushing the track toward the hero.
       </div>
     </div>
   );
