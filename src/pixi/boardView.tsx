@@ -1,5 +1,5 @@
 import { Container, Graphics, Text } from "@pixi/react";
-import { useGameStore } from "@/state/store";
+import { useGameStore } from "@/core/store";
 
 const TILE_W = 140;
 const TILE_H = 70;

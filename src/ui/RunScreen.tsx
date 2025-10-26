@@ -2,7 +2,7 @@ import { useEffect } from "react";
 import { Stage } from "@/pixi/stage";
 import { BoardView } from "@/pixi/boardView";
 import { useTicker } from "@/core/scheduler";
-import { useGameStore } from "@/state/store";
+import { useGameStore } from "@/core/store";
 
 export function RunScreen({ onExit }: { onExit: () => void }) {
   const timeLeft = useGameStore((s) => s.run.timeLeft);
