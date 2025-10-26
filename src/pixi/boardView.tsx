@@ -1,5 +1,6 @@
-import { Container, Graphics, Text } from "@pixi/react";
+import { Container, Graphics, Text, useApp } from "@pixi/react";
 import { useGameStore } from "@/core/store";
+import { STAGE_BASE_DIMENSIONS } from "@/pixi/stage";
 
 const TILE_W = 140;
 const TILE_H = 70;
@@ -31,14 +32,19 @@ function kindColor(kind: string): number {
 }
 
 export function BoardView() {
+  const app = useApp();
   const tiles = useGameStore((s) => s.run.tiles);
   const beginChannel = useGameStore((s) => s.beginChannel);
   const endChannel = useGameStore((s) => s.endChannel);
   const clickTile = useGameStore((s) => s.clickTile);
+  const scale = Math.max(
+    app.renderer.width / STAGE_BASE_DIMENSIONS.width,
+    0.1,
+  );
 
   // simple layout: 1 lane, 4 tiles horizontally; scale out later
   return (
-    <Container x={40} y={40}>
+    <Container x={40} y={40} scale={scale}>
       {tiles.map((t, i) => {
         const x = (TILE_W + COL_GAP) * i;
         const y = (TILE_H + LANE_GAP) * t.lane;
