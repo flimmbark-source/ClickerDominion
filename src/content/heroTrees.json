@@ -1,0 +1,20 @@
+[
+  {
+    "id": "knight.t1.power",
+    "branch": "knight",
+    "tier": 1,
+    "label": "Steel Oath",
+    "desc": "+50% Valor income",
+    "effects": [{ "kind": "mult", "target": "income.valor", "value": 1.5 }],
+    "cost": { "valor": 50 }
+  },
+  {
+    "id": "witch.t1.ritual",
+    "branch": "witch",
+    "tier": 1,
+    "label": "Quick Rituals",
+    "desc": "-25% shrine channel time",
+    "effects": [{ "kind": "mult", "target": "channel.shrine.time", "value": 0.75 }],
+    "cost": { "arcana": 50 }
+  }
+]
