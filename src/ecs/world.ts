@@ -1,0 +1,246 @@
+import type { BalanceConfig, MonsterKind } from '../logic/balance';
+import { createIntentState, type IntentState, type AbilityIntent, type ClickIntent } from '../logic/intents';
+import type { RenderSnapshot } from '../render/state';
+import { RNG } from '../utils/rng';
+import {
+  type ComponentStores,
+  type Entity,
+  createComponentStores,
+  type Transform,
+  type RenderIso,
+  type Health,
+  type MonsterTag,
+  type HeroState,
+  type MonsterState,
+  type Town,
+  type DoomClock,
+  type DarkEnergy,
+  type Corruption,
+} from './components';
+
+export interface TileState {
+  corruption: number;
+}
+
+export interface GridState {
+  width: number;
+  height: number;
+  tiles: TileState[];
+}
+
+export interface EconomyState {
+  gold: number;
+  shards: number;
+}
+
+export interface FloatingNumber {
+  tileX: number;
+  tileY: number;
+  value: number;
+  lifeTicks: number;
+}
+
+export interface World {
+  nextEntityId: number;
+  entities: Set<Entity>;
+  components: ComponentStores;
+  grid: GridState;
+  intents: IntentState;
+  rng: RNG;
+  time: {
+    tick: number;
+    seconds: number;
+  };
+  view: RenderSnapshot;
+  balance: BalanceConfig;
+  economy: EconomyState;
+  lastSelectedEntity: Entity | null;
+  floatingNumbers: FloatingNumber[];
+  currentIntents: {
+    clicks: ClickIntent[];
+    abilities: AbilityIntent[];
+  };
+}
+
+export function createGrid(width: number, height: number): GridState {
+  const tiles: TileState[] = new Array(width * height).fill(null).map(() => ({ corruption: 0 }));
+  return { width, height, tiles };
+}
+
+export function gridIndex(grid: GridState, x: number, y: number): number {
+  return y * grid.width + x;
+}
+
+export function getTile(grid: GridState, x: number, y: number): TileState | undefined {
+  if (x < 0 || y < 0 || x >= grid.width || y >= grid.height) {
+    return undefined;
+  }
+  return grid.tiles[gridIndex(grid, x, y)];
+}
+
+function baseRenderSnapshot(): RenderSnapshot {
+  return {
+    tiles: [],
+    entities: [],
+    floating: [],
+    hud: {
+      doomClockSeconds: 0,
+      darkEnergy: 0,
+      gold: 0,
+      warn30: false,
+      warn10: false,
+    },
+  };
+}
+
+export function createWorld(balance: BalanceConfig): World {
+  const grid = createGrid(balance.grid.width, balance.grid.height);
+  const components = createComponentStores();
+  const world: World = {
+    nextEntityId: 1,
+    entities: new Set(),
+    components,
+    grid,
+    intents: createIntentState(),
+    rng: new RNG(balance.rng.seed),
+    time: { tick: 0, seconds: 0 },
+    view: baseRenderSnapshot(),
+    balance,
+    economy: { gold: 0, shards: 0 },
+    lastSelectedEntity: null,
+    floatingNumbers: [],
+    currentIntents: { clicks: [], abilities: [] },
+  };
+
+  spawnInitialEntities(world);
+  return world;
+}
+
+export function createEntity(world: World): Entity {
+  const id = world.nextEntityId++;
+  world.entities.add(id);
+  return id;
+}
+
+export function removeEntity(world: World, entity: Entity): void {
+  world.entities.delete(entity);
+  const { components } = world;
+  components.transforms.delete(entity);
+  components.renderIso.delete(entity);
+  components.health.delete(entity);
+  components.clickable.delete(entity);
+  components.monster.delete(entity);
+  components.monsterState.delete(entity);
+  components.hero.delete(entity);
+  components.heroState.delete(entity);
+  components.town.delete(entity);
+  components.corruption.delete(entity);
+  components.rallyAura.delete(entity);
+  components.cleanse.delete(entity);
+  components.doomClock.delete(entity);
+  components.darkEnergy.delete(entity);
+  components.spawnPoint.delete(entity);
+  components.loot.delete(entity);
+}
+
+function addTransform(world: World, entity: Entity, data: Transform): void {
+  world.components.transforms.set(entity, data);
+}
+
+function addRenderIso(world: World, entity: Entity, data: RenderIso): void {
+  world.components.renderIso.set(entity, data);
+}
+
+function addHealth(world: World, entity: Entity, data: Health): void {
+  world.components.health.set(entity, data);
+}
+
+function addMonster(world: World, entity: Entity, data: MonsterTag, state: MonsterState): void {
+  world.components.monster.set(entity, data);
+  world.components.monsterState.set(entity, state);
+}
+
+function addHero(world: World, entity: Entity, state: HeroState): void {
+  world.components.hero.add(entity);
+  world.components.heroState.set(entity, state);
+}
+
+function addTown(world: World, entity: Entity, data: Town): void {
+  world.components.town.set(entity, data);
+}
+
+function addDoomClock(world: World, entity: Entity, data: DoomClock): void {
+  world.components.doomClock.set(entity, data);
+}
+
+function addDarkEnergy(world: World, entity: Entity, data: DarkEnergy): void {
+  world.components.darkEnergy.set(entity, data);
+}
+
+function spawnInitialEntities(world: World): void {
+  const centerX = Math.floor(world.grid.width / 2);
+  const centerY = Math.floor(world.grid.height / 2);
+  const balance = world.balance;
+
+  // Town entity
+  const town = createEntity(world);
+  addTransform(world, town, { tileX: centerX, tileY: centerY });
+  addRenderIso(world, town, { spriteId: 'town' });
+  addTown(world, town, { integrity: balance.town.integrityMax });
+  world.components.clickable.add(town);
+
+  // Hero entity
+  const hero = createEntity(world);
+  addTransform(world, hero, { tileX: centerX + 1, tileY: centerY });
+  addRenderIso(world, hero, { spriteId: 'hero' });
+  addHealth(world, hero, { hp: balance.hero.hp, max: balance.hero.hp });
+  addHero(world, hero, {
+    moveCooldown: Math.round((balance.hero.moveIntervalMs / 1000) * balance.ticksPerSecond),
+  });
+  world.components.clickable.add(hero);
+
+  // Doom clock entity
+  const doomEntity = createEntity(world);
+  addDoomClock(world, doomEntity, { seconds: balance.doomClock.startSeconds });
+  addDarkEnergy(world, doomEntity, {
+    value: 0,
+    cadenceTicks: Math.max(1, Math.round(balance.darkEnergy.aiCadenceSeconds * balance.ticksPerSecond)),
+    cadenceCounter: 0,
+  });
+
+  // Initial monsters near the town
+  const monsterPositions: Array<[number, number, MonsterKind]> = [
+    [centerX - 2, centerY, 'imp'],
+    [centerX + 2, centerY + 1, 'imp'],
+    [centerX, centerY - 3, 'imp'],
+  ];
+
+  for (const [tileX, tileY, kind] of monsterPositions) {
+    spawnMonster(world, tileX, tileY, kind);
+  }
+
+  // Seed some corruption tiles for contrast
+  const tile = getTile(world.grid, centerX - 1, centerY - 1);
+  if (tile) {
+    tile.corruption = 0.2;
+  }
+}
+
+export function spawnMonster(world: World, tileX: number, tileY: number, kind: MonsterKind): Entity {
+  const balance = world.balance;
+  const entity = createEntity(world);
+  addTransform(world, entity, { tileX, tileY });
+  addRenderIso(world, entity, { spriteId: `monster-${kind}` });
+  addHealth(world, entity, {
+    hp: balance.monsters.kinds[kind].hp,
+    max: balance.monsters.kinds[kind].hp,
+  });
+  addMonster(world, entity, { kind }, {
+    moveCooldown: Math.round(
+      (balance.monsters.base.stepIntervalMs / 1000) * balance.ticksPerSecond / balance.monsters.kinds[kind].speedMul,
+    ),
+    attackCooldown: Math.round((balance.monsters.base.attack.cooldownMs / 1000) * balance.ticksPerSecond),
+  });
+  world.components.clickable.add(entity);
+  return entity;
+}

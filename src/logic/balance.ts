@@ -1,0 +1,127 @@
+export interface BalanceConfig {
+  ticksPerSecond: number;
+  grid: {
+    width: number;
+    height: number;
+  };
+  iso: {
+    tileWidth: number;
+    tileHeight: number;
+  };
+  rng: {
+    seed: number;
+  };
+  doomClock: {
+    startSeconds: number;
+    warn30: boolean;
+    warn10: boolean;
+    onMonsterKillSeconds: number;
+    drainPerActionSeconds: number;
+  };
+  clickCombat: {
+    baseDamage: number;
+    critChance: number;
+    critMultiplier: number;
+    cleaveAdjacent: boolean;
+    floatingNumbers: boolean;
+  };
+  hero: {
+    hp: number;
+    moveIntervalMs: number;
+    autoTargetUnlocked: boolean;
+  };
+  town: {
+    integrityMax: number;
+    corruptProgressPerTick: number;
+    rally: {
+      radius: number;
+      bonusMultiplier: number;
+      durationSeconds: number;
+      cooldownSeconds: number;
+    };
+    cleanse: {
+      channelSeconds: number;
+      cooldownSeconds: number;
+      corruptionReductionPerTick: number;
+    };
+  };
+  corruption: {
+    tileMax: number;
+    tileIncreasePerTick: number;
+    tileDecreasePerTick: number;
+  };
+  darkEnergy: {
+    baseGainPerSecond: number;
+    perCorruptedTileGain: number;
+    perMonsterKillGain: number;
+    aiCadenceSeconds: number;
+    actions: {
+      corruptTile: {
+        cost: number;
+        cooldownSeconds: number;
+      };
+      spawnWave: {
+        cost: number;
+        cooldownSeconds: number;
+        wave: {
+          size: number;
+          monsterKind: MonsterKind;
+          spawnEdgePadding: number;
+        };
+      };
+      drainClock: {
+        cost: number;
+        cooldownSeconds: number;
+        seconds: number;
+      };
+    };
+  };
+  monsters: {
+    base: {
+      stepIntervalMs: number;
+      attack: {
+        damage: number;
+        cooldownMs: number;
+      };
+    };
+    kinds: Record<MonsterKind, {
+      hp: number;
+      speedMul: number;
+      damageMul: number;
+    }>;
+    spawn: {
+      edgeRing: boolean;
+      minDistanceFromTown: number;
+    };
+  };
+  economy: {
+    goldPerKill: number;
+    timeShardPerKill: number;
+    upgradeCosts: Record<string, number>;
+  };
+  ui: {
+    flashThresholds: {
+      t30: number;
+      t10: number;
+    };
+    showGrid: boolean;
+    showPathDebug: boolean;
+  };
+}
+
+export type MonsterKind = 'imp' | 'brute' | 'wisp';
+
+let cachedBalance: BalanceConfig | null = null;
+
+export async function loadBalance(): Promise<BalanceConfig> {
+  if (cachedBalance) {
+    return cachedBalance;
+  }
+  const response = await fetch('/config/balance.json');
+  if (!response.ok) {
+    throw new Error(`Failed to load balance config: ${response.status}`);
+  }
+  const json = (await response.json()) as BalanceConfig;
+  cachedBalance = json;
+  return json;
+}
