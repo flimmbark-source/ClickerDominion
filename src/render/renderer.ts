@@ -1,6 +1,6 @@
 import type { BalanceConfig } from '../logic/balance';
 import { toScreen, toTile } from './isometric';
-import type { RenderSnapshot } from './state';
+import type { RenderEntity, RenderSnapshot, RenderTile } from './state';
 
 export class Renderer {
   private readonly canvas: HTMLCanvasElement;
@@ -9,6 +9,7 @@ export class Renderer {
   private height = 0;
   private offsetX = 0;
   private offsetY = 0;
+  private hoverTile: { tileX: number; tileY: number } | null = null;
 
   constructor(canvas: HTMLCanvasElement, balance: BalanceConfig) {
     const ctx = canvas.getContext('2d');
@@ -29,12 +30,21 @@ export class Renderer {
 
     const sortedTiles = [...snapshot.tiles].sort((a, b) => (a.tileY - b.tileY) || (a.tileX - b.tileX));
     for (const tile of sortedTiles) {
-      this.drawTile(tile.tileX, tile.tileY, tile.corruption, balance);
+      this.drawTile(tile, balance);
+    }
+
+    if (this.hoverTile) {
+      const highlight = sortedTiles.find(
+        (tile) => tile.tileX === this.hoverTile?.tileX && tile.tileY === this.hoverTile?.tileY,
+      );
+      if (highlight) {
+        this.drawTileHighlight(highlight, balance);
+      }
     }
 
     const sortedEntities = [...snapshot.entities].sort((a, b) => (a.tileY - b.tileY) || (a.tileX - b.tileX));
     for (const entity of sortedEntities) {
-      this.drawEntity(entity.tileX, entity.tileY, entity.kind, balance);
+      this.drawEntity(entity, balance);
     }
 
     for (const float of snapshot.floating) {
@@ -61,45 +71,133 @@ export class Renderer {
     this.ctx.imageSmoothingEnabled = false;
     this.offsetX = this.width / 2;
     this.offsetY = balance.iso.tileHeight;
-    void balance;
   }
 
-  private drawTile(tileX: number, tileY: number, corruption: number, balance: BalanceConfig): void {
+  setHoverTile(tile: { tileX: number; tileY: number } | null): void {
+    if (!tile) {
+      this.hoverTile = null;
+      return;
+    }
+    this.hoverTile = { tileX: tile.tileX, tileY: tile.tileY };
+  }
+
+  private drawTile(tile: RenderTile, balance: BalanceConfig): void {
     const ctx = this.ctx;
-    const pos = toScreen(tileX, tileY, balance);
+    const pos = toScreen(tile.tileX, tile.tileY, balance);
     const { tileWidth, tileHeight } = balance.iso;
+    ctx.save();
     ctx.beginPath();
     ctx.moveTo(pos.x, pos.y - tileHeight / 2);
     ctx.lineTo(pos.x + tileWidth / 2, pos.y);
     ctx.lineTo(pos.x, pos.y + tileHeight / 2);
     ctx.lineTo(pos.x - tileWidth / 2, pos.y);
     ctx.closePath();
-    const base = 60 + Math.floor(corruption * 120);
-    ctx.fillStyle = `rgb(${base}, ${Math.max(20, 200 - base)}, ${Math.max(40, 140 - base)})`;
+
+    const fill = this.getTileFill(tile);
+    ctx.fillStyle = fill;
     ctx.fill();
-    ctx.strokeStyle = 'rgba(255,255,255,0.1)';
+    if (tile.corrupted) {
+      const intensity = Math.min(1, tile.corruption);
+      ctx.fillStyle = `rgba(140, 30, 160, ${0.2 + intensity * 0.4})`;
+      ctx.fill();
+    }
+    ctx.strokeStyle = 'rgba(0,0,0,0.25)';
+    ctx.lineWidth = 1;
     ctx.stroke();
+    ctx.restore();
   }
 
-  private drawEntity(tileX: number, tileY: number, kind: string, balance: BalanceConfig): void {
+  private drawTileHighlight(tile: RenderTile, balance: BalanceConfig): void {
     const ctx = this.ctx;
-    const pos = toScreen(tileX, tileY, balance);
+    const pos = toScreen(tile.tileX, tile.tileY, balance);
+    const { tileWidth, tileHeight } = balance.iso;
+    ctx.save();
+    ctx.beginPath();
+    ctx.moveTo(pos.x, pos.y - tileHeight / 2);
+    ctx.lineTo(pos.x + tileWidth / 2, pos.y);
+    ctx.lineTo(pos.x, pos.y + tileHeight / 2);
+    ctx.lineTo(pos.x - tileWidth / 2, pos.y);
+    ctx.closePath();
+    ctx.strokeStyle = 'rgba(255, 255, 255, 0.8)';
+    ctx.lineWidth = 2;
+    ctx.stroke();
+    ctx.restore();
+  }
+
+  private drawEntity(entity: RenderEntity, balance: BalanceConfig): void {
+    const ctx = this.ctx;
+    const pos = toScreen(entity.tileX, entity.tileY, balance);
     const sizeW = balance.iso.tileWidth / 2;
     const sizeH = balance.iso.tileHeight / 2;
     ctx.save();
     ctx.translate(pos.x, pos.y - sizeH / 2);
     ctx.beginPath();
     ctx.rect(-sizeW / 4, -sizeH, sizeW / 2, sizeH);
-    if (kind === 'hero') {
-      ctx.fillStyle = '#4caf50';
-    } else if (kind === 'monster') {
-      ctx.fillStyle = '#d84315';
-    } else if (kind === 'town') {
-      ctx.fillStyle = '#607d8b';
-    } else {
-      ctx.fillStyle = '#ffeb3b';
-    }
+    ctx.fillStyle = this.getEntityFill(entity);
     ctx.fill();
+    if (entity.hp !== undefined && entity.hpMax !== undefined) {
+      this.drawHealthBar(entity.hp, entity.hpMax, sizeW, sizeH);
+    }
+    if (entity.kind === 'town' && entity.integrity !== undefined) {
+      this.drawTownIntegrity(entity.integrity, balance.town.integrityMax, sizeW, sizeH);
+    }
+    ctx.restore();
+  }
+
+  private getTileFill(tile: RenderTile): string {
+    switch (tile.type) {
+      case 'road':
+        return '#8d6e63';
+      case 'town':
+        return '#607d8b';
+      default:
+        return '#4a7a46';
+    }
+  }
+
+  private getEntityFill(entity: RenderEntity): string {
+    if (entity.kind === 'hero') {
+      return '#4caf50';
+    }
+    if (entity.kind === 'monster') {
+      switch (entity.monsterKind) {
+        case 'brute':
+          return '#bf360c';
+        case 'wisp':
+          return '#8e24aa';
+        default:
+          return '#f4511e';
+      }
+    }
+    if (entity.kind === 'town') {
+      return '#546e7a';
+    }
+    return '#ffeb3b';
+  }
+
+  private drawHealthBar(hp: number, max: number, sizeW: number, sizeH: number): void {
+    const ctx = this.ctx;
+    const ratio = Math.max(0, Math.min(1, hp / Math.max(1, max)));
+    const barWidth = sizeW / 2;
+    ctx.save();
+    ctx.translate(0, -sizeH - 6);
+    ctx.fillStyle = 'rgba(0,0,0,0.6)';
+    ctx.fillRect(-barWidth / 2, 0, barWidth, 4);
+    ctx.fillStyle = '#66bb6a';
+    ctx.fillRect(-barWidth / 2 + 1, 1, (barWidth - 2) * ratio, 2);
+    ctx.restore();
+  }
+
+  private drawTownIntegrity(integrity: number, maxIntegrity: number, sizeW: number, sizeH: number): void {
+    const ctx = this.ctx;
+    const ratio = Math.max(0, Math.min(1, integrity / Math.max(1, maxIntegrity)));
+    const barWidth = sizeW / 1.5;
+    ctx.save();
+    ctx.translate(0, -sizeH - 10);
+    ctx.fillStyle = 'rgba(0,0,0,0.6)';
+    ctx.fillRect(-barWidth / 2, 0, barWidth, 4);
+    ctx.fillStyle = '#29b6f6';
+    ctx.fillRect(-barWidth / 2 + 1, 1, (barWidth - 2) * ratio, 2);
     ctx.restore();
   }
 

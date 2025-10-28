@@ -18,8 +18,12 @@ import {
   type Corruption,
 } from './components';
 
+export type TileType = 'plain' | 'road' | 'town';
+
 export interface TileState {
+  type: TileType;
   corruption: number;
+  corrupted: boolean;
 }
 
 export interface GridState {
@@ -63,7 +67,12 @@ export interface World {
 }
 
 export function createGrid(width: number, height: number): GridState {
-  const tiles: TileState[] = new Array(width * height).fill(null).map(() => ({ corruption: 0 }));
+  const tiles: TileState[] = [];
+  for (let y = 0; y < height; y += 1) {
+    for (let x = 0; x < width; x += 1) {
+      tiles.push({ type: 'plain', corruption: 0, corrupted: false });
+    }
+  }
   return { width, height, tiles };
 }
 
@@ -182,6 +191,23 @@ function spawnInitialEntities(world: World): void {
   const centerY = Math.floor(world.grid.height / 2);
   const balance = world.balance;
 
+  const townTile = getTile(world.grid, centerX, centerY);
+  if (townTile) {
+    townTile.type = 'town';
+  }
+  const roadOffsets: Array<[number, number]> = [
+    [1, 0],
+    [0, 1],
+    [-1, 0],
+    [0, -1],
+  ];
+  for (const [dx, dy] of roadOffsets) {
+    const tile = getTile(world.grid, centerX + dx, centerY + dy);
+    if (tile && tile.type === 'plain') {
+      tile.type = 'road';
+    }
+  }
+
   // Town entity
   const town = createEntity(world);
   addTransform(world, town, { tileX: centerX, tileY: centerY });
@@ -223,6 +249,7 @@ function spawnInitialEntities(world: World): void {
   const tile = getTile(world.grid, centerX - 1, centerY - 1);
   if (tile) {
     tile.corruption = 0.2;
+    tile.corrupted = true;
   }
 }
 

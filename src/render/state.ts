@@ -1,8 +1,11 @@
+import type { TileType } from '../ecs/world';
 import type { MonsterKind } from '../logic/balance';
 
 export interface RenderTile {
   tileX: number;
   tileY: number;
+  type: TileType;
+  corrupted: boolean;
   corruption: number;
 }
 
