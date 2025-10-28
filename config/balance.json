@@ -4,6 +4,15 @@
     "width": 40,
     "height": 40
   },
+  "initialSpawns": {
+    "town": { "tileX": 21, "tileY": 20 },
+    "hero": { "tileX": 20, "tileY": 20 },
+    "monsters": [
+      { "tileX": 23, "tileY": 20, "kind": "imp" },
+      { "tileX": 22, "tileY": 21, "kind": "imp" },
+      { "tileX": 22, "tileY": 19, "kind": "imp" }
+    ]
+  },
   "iso": {
     "tileWidth": 64,
     "tileHeight": 32

@@ -67,10 +67,10 @@ function combatResolutionSystem(world: World): void {
     if (!health) {
       continue;
     }
-    const damage = computeClickDamage(world);
+    const { damage, crit } = computeClickDamage(world);
     health.hp = Math.max(0, health.hp - damage);
     if (balance.clickCombat.floatingNumbers) {
-      pushFloatingNumber(world, click.tileX, click.tileY, damage);
+      pushFloatingNumber(world, click.tileX, click.tileY, damage, crit);
     }
     if (health.hp <= 0) {
       onEntityDefeated(world, target);
@@ -323,6 +323,7 @@ function renderSyncSystem(world: World): void {
     y: fn.tileY,
     value: fn.value,
     life: fn.lifeTicks,
+    crit: fn.crit,
   }));
 
   const doom = Array.from(world.components.doomClock.values())[0];
@@ -412,16 +413,16 @@ function findTopClickable(world: World, tileX: number, tileY: number): Entity | 
   return monsterHit ?? otherHit;
 }
 
-function computeClickDamage(world: World): number {
+function computeClickDamage(world: World): { damage: number; crit: boolean } {
   const balance = world.balance;
   const crit = world.rng.next() < balance.clickCombat.critChance;
   const dmg = balance.clickCombat.baseDamage * (crit ? balance.clickCombat.critMultiplier : 1);
-  return Math.round(dmg);
+  return { damage: Math.round(dmg), crit };
 }
 
-function pushFloatingNumber(world: World, tileX: number, tileY: number, value: number): void {
+function pushFloatingNumber(world: World, tileX: number, tileY: number, value: number, crit: boolean): void {
   const life = Math.round(0.8 * world.balance.ticksPerSecond);
-  const fn: FloatingNumber = { tileX, tileY, value, lifeTicks: life };
+  const fn: FloatingNumber = { tileX, tileY, value, lifeTicks: life, crit };
   world.floatingNumbers.push(fn);
 }
 
