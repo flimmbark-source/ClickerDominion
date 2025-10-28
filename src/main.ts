@@ -21,6 +21,7 @@ async function bootstrap() {
   canvas.style.left = '0';
   canvas.style.width = '100%';
   canvas.style.height = '100%';
+  canvas.style.cursor = 'crosshair';
   root.style.position = 'relative';
   root.appendChild(canvas);
 
@@ -34,6 +35,28 @@ async function bootstrap() {
     const screenY = (event.clientY - rect.top) * dpr;
     const tile = renderer.screenToTile(screenX, screenY, balance);
     queueClick(world.intents, { tileX: tile.tileX, tileY: tile.tileY });
+  });
+
+  canvas.addEventListener('mousemove', (event) => {
+    const rect = canvas.getBoundingClientRect();
+    const dpr = window.devicePixelRatio || 1;
+    const screenX = (event.clientX - rect.left) * dpr;
+    const screenY = (event.clientY - rect.top) * dpr;
+    const tile = renderer.screenToTile(screenX, screenY, balance);
+    if (
+      tile.tileX >= 0 &&
+      tile.tileY >= 0 &&
+      tile.tileX < world.grid.width &&
+      tile.tileY < world.grid.height
+    ) {
+      renderer.setHoverTile(tile);
+    } else {
+      renderer.setHoverTile(null);
+    }
+  });
+
+  canvas.addEventListener('mouseleave', () => {
+    renderer.setHoverTile(null);
   });
 
   window.addEventListener('keydown', (event) => {

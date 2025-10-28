@@ -126,6 +126,7 @@ function statusEffectSystem(world: World): void {
           0,
           tile.corruption - world.balance.town.cleanse.corruptionReductionPerTick,
         );
+        tile.corrupted = tile.corruption > 0.0001;
       }
       if (cleanse.tLeftTicks <= 0) {
         cleanse.tLeftTicks = 0;
@@ -208,7 +209,7 @@ function darkLordSystem(world: World): void {
   if (!dark) {
     return;
   }
-  const corruptedTiles = world.grid.tiles.filter((tile) => tile.corruption > 0.5).length;
+  const corruptedTiles = world.grid.tiles.filter((tile) => tile.corrupted).length;
   const gainPerTick =
     balance.darkEnergy.baseGainPerSecond / balance.ticksPerSecond +
     (corruptedTiles * balance.darkEnergy.perCorruptedTileGain) / balance.ticksPerSecond;
@@ -230,6 +231,7 @@ function corruptionSystem(world: World): void {
     } else {
       tile.corruption = Math.max(0, tile.corruption - decrease);
     }
+    tile.corrupted = tile.corruption > 0.0001;
   }
 }
 
@@ -261,7 +263,13 @@ function renderSyncSystem(world: World): void {
     for (let x = 0; x < world.grid.width; x += 1) {
       const tile = getTile(world.grid, x, y);
       if (!tile) continue;
-      snapshot.tiles.push({ tileX: x, tileY: y, corruption: tile.corruption });
+      snapshot.tiles.push({
+        tileX: x,
+        tileY: y,
+        corruption: tile.corruption,
+        corrupted: tile.corrupted,
+        type: tile.type,
+      });
     }
   }
 
@@ -458,7 +466,11 @@ function tryCorruptTile(world: World): boolean {
   const tiles = world.grid.tiles;
   for (const tile of tiles) {
     if (tile.corruption < world.balance.corruption.tileMax) {
-      tile.corruption = Math.min(world.balance.corruption.tileMax, tile.corruption + world.balance.corruption.tileIncreasePerTick * 5);
+      tile.corruption = Math.min(
+        world.balance.corruption.tileMax,
+        tile.corruption + world.balance.corruption.tileIncreasePerTick * 5,
+      );
+      tile.corrupted = tile.corruption > 0.0001;
       return true;
     }
   }
