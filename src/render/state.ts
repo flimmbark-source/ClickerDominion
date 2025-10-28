@@ -25,6 +25,7 @@ export interface FloatingNumberView {
   y: number;
   value: number;
   life: number;
+  crit: boolean;
 }
 
 export interface HudState {

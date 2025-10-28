@@ -42,6 +42,7 @@ export interface FloatingNumber {
   tileY: number;
   value: number;
   lifeTicks: number;
+  crit: boolean;
 }
 
 export interface World {
@@ -187,11 +188,10 @@ function addDarkEnergy(world: World, entity: Entity, data: DarkEnergy): void {
 }
 
 function spawnInitialEntities(world: World): void {
-  const centerX = Math.floor(world.grid.width / 2);
-  const centerY = Math.floor(world.grid.height / 2);
   const balance = world.balance;
+  const { town: townSpawn, hero: heroSpawn, monsters: monsterSpawns } = balance.initialSpawns;
 
-  const townTile = getTile(world.grid, centerX, centerY);
+  const townTile = getTile(world.grid, townSpawn.tileX, townSpawn.tileY);
   if (townTile) {
     townTile.type = 'town';
   }
@@ -202,7 +202,7 @@ function spawnInitialEntities(world: World): void {
     [0, -1],
   ];
   for (const [dx, dy] of roadOffsets) {
-    const tile = getTile(world.grid, centerX + dx, centerY + dy);
+    const tile = getTile(world.grid, townSpawn.tileX + dx, townSpawn.tileY + dy);
     if (tile && tile.type === 'plain') {
       tile.type = 'road';
     }
@@ -210,14 +210,14 @@ function spawnInitialEntities(world: World): void {
 
   // Town entity
   const town = createEntity(world);
-  addTransform(world, town, { tileX: centerX, tileY: centerY });
+  addTransform(world, town, { tileX: townSpawn.tileX, tileY: townSpawn.tileY });
   addRenderIso(world, town, { spriteId: 'town' });
   addTown(world, town, { integrity: balance.town.integrityMax });
   world.components.clickable.add(town);
 
   // Hero entity
   const hero = createEntity(world);
-  addTransform(world, hero, { tileX: centerX + 1, tileY: centerY });
+  addTransform(world, hero, { tileX: heroSpawn.tileX, tileY: heroSpawn.tileY });
   addRenderIso(world, hero, { spriteId: 'hero' });
   addHealth(world, hero, { hp: balance.hero.hp, max: balance.hero.hp });
   addHero(world, hero, {
@@ -235,18 +235,12 @@ function spawnInitialEntities(world: World): void {
   });
 
   // Initial monsters near the town
-  const monsterPositions: Array<[number, number, MonsterKind]> = [
-    [centerX - 2, centerY, 'imp'],
-    [centerX + 2, centerY + 1, 'imp'],
-    [centerX, centerY - 3, 'imp'],
-  ];
-
-  for (const [tileX, tileY, kind] of monsterPositions) {
-    spawnMonster(world, tileX, tileY, kind);
+  for (const spawn of monsterSpawns) {
+    spawnMonster(world, spawn.tileX, spawn.tileY, spawn.kind);
   }
 
   // Seed some corruption tiles for contrast
-  const tile = getTile(world.grid, centerX - 1, centerY - 1);
+  const tile = getTile(world.grid, townSpawn.tileX - 1, townSpawn.tileY - 1);
   if (tile) {
     tile.corruption = 0.2;
     tile.corrupted = true;

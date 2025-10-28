@@ -4,6 +4,11 @@ export interface BalanceConfig {
     width: number;
     height: number;
   };
+  initialSpawns: {
+    town: { tileX: number; tileY: number };
+    hero: { tileX: number; tileY: number };
+    monsters: Array<{ tileX: number; tileY: number; kind: MonsterKind }>;
+  };
   iso: {
     tileWidth: number;
     tileHeight: number;

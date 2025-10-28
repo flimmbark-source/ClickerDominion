@@ -49,8 +49,8 @@ export class Renderer {
 
     for (const float of snapshot.floating) {
       const pos = toScreen(float.x, float.y, balance);
-      ctx.fillStyle = 'rgba(255,255,255,0.9)';
-      ctx.font = '16px sans-serif';
+      ctx.fillStyle = float.crit ? 'rgba(255,215,0,0.95)' : 'rgba(255,255,255,0.9)';
+      ctx.font = float.crit ? 'bold 18px sans-serif' : '16px sans-serif';
       ctx.fillText(`-${float.value}`, pos.x, pos.y - float.life * 0.5);
     }
 
