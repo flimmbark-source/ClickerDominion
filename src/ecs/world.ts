@@ -24,6 +24,8 @@ export interface TileState {
   type: TileType;
   corruption: number;
   corrupted: boolean;
+  corruptProgress: number;
+  corrupting: boolean;
 }
 
 export interface GridState {
@@ -71,7 +73,7 @@ export function createGrid(width: number, height: number): GridState {
   const tiles: TileState[] = [];
   for (let y = 0; y < height; y += 1) {
     for (let x = 0; x < width; x += 1) {
-      tiles.push({ type: 'plain', corruption: 0, corrupted: false });
+      tiles.push({ type: 'plain', corruption: 0, corrupted: false, corruptProgress: 0, corrupting: false });
     }
   }
   return { width, height, tiles };
@@ -244,6 +246,8 @@ function spawnInitialEntities(world: World): void {
   if (tile) {
     tile.corruption = 0.2;
     tile.corrupted = true;
+    tile.corruptProgress = 1;
+    tile.corrupting = false;
   }
 }
 
