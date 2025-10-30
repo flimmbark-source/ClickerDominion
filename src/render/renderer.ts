@@ -76,8 +76,25 @@ export class Renderer {
     this.canvas.style.height = `${Math.floor(this.height / dpr)}px`;
     this.ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     this.ctx.imageSmoothingEnabled = false;
-    this.offsetX = this.width / 2;
-    this.offsetY = balance.iso.tileHeight;
+    const { tileWidth, tileHeight } = balance.iso;
+    const halfW = tileWidth / 2;
+    const halfH = tileHeight / 2;
+    const maxX = balance.grid.width > 0 ? balance.grid.width - 1 : 0;
+    const maxY = balance.grid.height > 0 ? balance.grid.height - 1 : 0;
+    const corners = [
+      toScreen(0, 0, balance),
+      toScreen(maxX, 0, balance),
+      toScreen(0, maxY, balance),
+      toScreen(maxX, maxY, balance),
+    ];
+    const minBoundX = Math.min(...corners.map((corner) => corner.x - halfW));
+    const maxBoundX = Math.max(...corners.map((corner) => corner.x + halfW));
+    const minBoundY = Math.min(...corners.map((corner) => corner.y - halfH));
+    const maxBoundY = Math.max(...corners.map((corner) => corner.y + halfH));
+    const centerX = (minBoundX + maxBoundX) / 2;
+    const centerY = (minBoundY + maxBoundY) / 2;
+    this.offsetX = this.width / 2 - centerX;
+    this.offsetY = this.height / 2 - centerY;
   }
 
   setHoverTile(tile: { tileX: number; tileY: number } | null): void {
@@ -103,11 +120,6 @@ export class Renderer {
     const fill = this.getTileFill(tile);
     ctx.fillStyle = fill;
     ctx.fill();
-    if (tile.corrupted) {
-      const intensity = Math.min(1, tile.corruption);
-      ctx.fillStyle = `rgba(140, 30, 160, ${0.2 + intensity * 0.4})`;
-      ctx.fill();
-    }
     ctx.strokeStyle = 'rgba(0,0,0,0.25)';
     ctx.lineWidth = 1;
     ctx.stroke();
@@ -152,14 +164,41 @@ export class Renderer {
   }
 
   private getTileFill(tile: RenderTile): string {
-    switch (tile.type) {
-      case 'road':
-        return '#8d6e63';
-      case 'town':
-        return '#607d8b';
-      default:
-        return '#4a7a46';
+    const base = (() => {
+      switch (tile.type) {
+        case 'road':
+          return '#8d6e63';
+        case 'town':
+          return '#607d8b';
+        default:
+          return '#4a7a46';
+      }
+    })();
+    const corruptionLevel = Math.max(0, Math.min(1, tile.corruption));
+    if (tile.corrupted) {
+      return this.darkenColor(base, 0.45 + corruptionLevel * 0.4);
     }
+    if (corruptionLevel > 0) {
+      return this.darkenColor(base, corruptionLevel * 0.25);
+    }
+    return base;
+  }
+
+  private darkenColor(hex: string, intensity: number): string {
+    if (!hex.startsWith('#') || (hex.length !== 7 && hex.length !== 4)) {
+      return hex;
+    }
+    const normalized = Math.max(0, Math.min(1, intensity));
+    const expand = (value: string) => (value.length === 1 ? value.repeat(2) : value);
+    const r = parseInt(expand(hex.slice(1, hex.length === 4 ? 2 : 3)), 16);
+    const g = parseInt(expand(hex.slice(hex.length === 4 ? 2 : 3, hex.length === 4 ? 3 : 5)), 16);
+    const b = parseInt(expand(hex.slice(hex.length === 4 ? 3 : 5)), 16);
+    const apply = (channel: number) => Math.round(channel * (1 - normalized));
+    return `#${this.toHex(apply(r))}${this.toHex(apply(g))}${this.toHex(apply(b))}`;
+  }
+
+  private toHex(value: number): string {
+    return Math.max(0, Math.min(255, value)).toString(16).padStart(2, '0');
   }
 
   private getEntityFill(entity: RenderEntity): string {

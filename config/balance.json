@@ -1,16 +1,16 @@
 {
   "ticksPerSecond": 20,
   "grid": {
-    "width": 40,
-    "height": 40
+    "width": 10,
+    "height": 10
   },
   "initialSpawns": {
-    "town": { "tileX": 21, "tileY": 20 },
-    "hero": { "tileX": 20, "tileY": 20 },
+    "town": { "tileX": 5, "tileY": 4 },
+    "hero": { "tileX": 4, "tileY": 4 },
     "monsters": [
-      { "tileX": 23, "tileY": 20, "kind": "imp" },
-      { "tileX": 22, "tileY": 21, "kind": "imp" },
-      { "tileX": 22, "tileY": 19, "kind": "imp" }
+      { "tileX": 7, "tileY": 4, "kind": "imp" },
+      { "tileX": 6, "tileY": 5, "kind": "imp" },
+      { "tileX": 6, "tileY": 3, "kind": "imp" }
     ]
   },
   "iso": {
@@ -47,7 +47,7 @@
   },
   "town": {
     "integrityMax": 100,
-    "corruptProgressPerTick": 0.0,
+    "corruptProgressPerTick": 0.1,
     "rally": {
       "radius": 2,
       "bonusMultiplier": 1.25,

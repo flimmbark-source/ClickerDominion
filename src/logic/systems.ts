@@ -1,9 +1,11 @@
-import type { Entity } from '../ecs/components';
+import type { Entity, Transform } from '../ecs/components';
 import { getTile, gridIndex, removeEntity, spawnMonster, type FloatingNumber, type World } from '../ecs/world';
 import { consumeIntents, beginTick } from './intents';
 import { findPath } from './pathfinding';
 
 export type System = (world: World) => void;
+
+type TownTarget = { entity: Entity; transform: Transform };
 
 export function createSystemPipeline(): System[] {
   return [
@@ -123,10 +125,16 @@ function statusEffectSystem(world: World): void {
       cleanse.tLeftTicks -= 1;
       const tile = getTile(world.grid, cleanse.targetTileX, cleanse.targetTileY);
       if (tile) {
-        tile.corruption = Math.max(
-          0,
-          tile.corruption - world.balance.town.cleanse.corruptionReductionPerTick,
-        );
+        const reduction = world.balance.town.cleanse.corruptionReductionPerTick;
+        tile.corruption = Math.max(0, tile.corruption - reduction);
+        tile.corruptProgress = Math.max(0, tile.corruptProgress - reduction);
+        if (tile.corruption <= 0.0001) {
+          tile.corruption = 0;
+        }
+        if (tile.corruptProgress <= 0.0001) {
+          tile.corruptProgress = 0;
+          tile.corrupting = false;
+        }
         tile.corrupted = tile.corruption > 0.0001;
       }
       if (cleanse.tLeftTicks <= 0) {
@@ -140,11 +148,6 @@ function statusEffectSystem(world: World): void {
   // ensure hero/town status flags line up
   for (const [entity, town] of world.components.town.entries()) {
     town.rallied = hasActiveRally(world, entity);
-    const corrupt = getTile(world.grid, world.components.transforms.get(entity)?.tileX ?? 0, world.components.transforms.get(entity)?.tileY ?? 0);
-    if (corrupt) {
-      const increase = world.balance.town.corruptProgressPerTick;
-      town.integrity = Math.max(0, town.integrity - increase);
-    }
   }
 
   // dark energy base gain per tick handled in darkLordSystem
@@ -152,13 +155,13 @@ function statusEffectSystem(world: World): void {
 
 function monsterAiSystem(world: World): void {
   const balance = world.balance;
-  const towns = Array.from(world.components.town.keys());
-  if (towns.length === 0) {
-    return;
-  }
-  const townEntity = towns[0];
-  const townTransform = world.components.transforms.get(townEntity);
-  if (!townTransform) {
+  const townTargets: TownTarget[] = Array.from(world.components.town.keys())
+    .map((entity) => {
+      const transform = world.components.transforms.get(entity);
+      return transform ? { entity, transform } : null;
+    })
+    .filter((value): value is TownTarget => value !== null);
+  if (townTargets.length === 0) {
     return;
   }
 
@@ -166,6 +169,8 @@ function monsterAiSystem(world: World): void {
   for (const [entity, transform] of world.components.transforms.entries()) {
     occupied.add(gridIndex(world.grid, transform.tileX, transform.tileY));
   }
+
+  const corruptingTiles = new Set<number>();
 
   for (const [entity, monster] of world.components.monster.entries()) {
     const state = world.components.monsterState.get(entity);
@@ -177,11 +182,22 @@ function monsterAiSystem(world: World): void {
       state.moveCooldown -= 1;
       continue;
     }
+    const target = findNearestTownTarget(townTargets, transform.tileX, transform.tileY);
+    if (!target) {
+      continue;
+    }
+    const goal = target.transform;
     const path = findPath(
       world.grid,
       { x: transform.tileX, y: transform.tileY },
-      { x: townTransform.tileX, y: townTransform.tileY },
-      (x, y) => !occupied.has(gridIndex(world.grid, x, y)) || (x === townTransform.tileX && y === townTransform.tileY),
+      { x: goal.tileX, y: goal.tileY },
+      (x, y) => {
+        const idx = gridIndex(world.grid, x, y);
+        if (idx === gridIndex(world.grid, goal.tileX, goal.tileY)) {
+          return true;
+        }
+        return !occupied.has(idx);
+      },
     );
     if (path.length >= 2) {
       const next = path[1];
@@ -189,21 +205,58 @@ function monsterAiSystem(world: World): void {
       transform.tileX = next.x;
       transform.tileY = next.y;
       occupied.add(gridIndex(world.grid, transform.tileX, transform.tileY));
+      handleTownContact(world, transform.tileX, transform.tileY, corruptingTiles);
     } else if (path.length === 1) {
-      // already at town tile -> damage town
-      const town = world.components.town.get(townEntity);
-      if (town) {
-        town.integrity = Math.max(0, town.integrity - balance.monsters.base.attack.damage);
-        if (town.integrity === 0) {
-          world.components.town.delete(townEntity);
-        }
-        if (balance.doomClock.penalties.townDamageSeconds > 0) {
-          adjustDoomClock(world, -balance.doomClock.penalties.townDamageSeconds);
-        }
-      }
+      handleTownContact(world, transform.tileX, transform.tileY, corruptingTiles);
     }
     state.moveCooldown = Math.max(1, Math.round((balance.monsters.base.stepIntervalMs / 1000) * balance.ticksPerSecond / balance.monsters.kinds[monster.kind].speedMul));
     state.attackCooldown = Math.max(0, state.attackCooldown - 1);
+  }
+
+  for (let i = 0; i < world.grid.tiles.length; i += 1) {
+    const tile = world.grid.tiles[i];
+    if (tile.type === 'town') {
+      tile.corrupting = corruptingTiles.has(i);
+    }
+  }
+}
+
+function findNearestTownTarget(targets: TownTarget[], fromX: number, fromY: number): TownTarget | undefined {
+  let best: TownTarget | undefined;
+  let bestDist = Infinity;
+  for (const target of targets) {
+    const dist = Math.abs(target.transform.tileX - fromX) + Math.abs(target.transform.tileY - fromY);
+    if (dist < bestDist || (dist === bestDist && target.entity < (best?.entity ?? Infinity))) {
+      best = target;
+      bestDist = dist;
+    }
+  }
+  return best;
+}
+
+function handleTownContact(world: World, tileX: number, tileY: number, corruptingTiles: Set<number>): void {
+  const tile = getTile(world.grid, tileX, tileY);
+  if (!tile || tile.type !== 'town') {
+    return;
+  }
+  const townEntity = findTownAt(world, tileX, tileY);
+  if (!townEntity) {
+    return;
+  }
+  const town = world.components.town.get(townEntity);
+  if (!town) {
+    return;
+  }
+  const balance = world.balance;
+  corruptingTiles.add(gridIndex(world.grid, tileX, tileY));
+  town.integrity = Math.max(0, town.integrity - balance.monsters.base.attack.damage);
+  tile.corruptProgress = Math.min(1, tile.corruptProgress + balance.town.corruptProgressPerTick);
+  tile.corruption = Math.max(tile.corruption, tile.corruptProgress);
+  if (town.integrity === 0) {
+    world.components.town.delete(townEntity);
+  }
+  if (balance.doomClock.penalties.townDamageSeconds > 0) {
+    adjustDoomClock(world, -balance.doomClock.penalties.townDamageSeconds);
   }
 }
 
@@ -227,15 +280,33 @@ function darkLordSystem(world: World): void {
 }
 
 function corruptionSystem(world: World): void {
-  const increase = world.balance.corruption.tileIncreasePerTick;
-  const decrease = world.balance.corruption.tileDecreasePerTick;
+  const spreadIncrease = world.balance.corruption.tileIncreasePerTick;
+  const decay = world.balance.corruption.tileDecreasePerTick;
+  const progressRate = world.balance.town.corruptProgressPerTick;
+  const maxCorruption = world.balance.corruption.tileMax;
   for (const tile of world.grid.tiles) {
-    if (tile.corruption > 0) {
-      tile.corruption = Math.min(world.balance.corruption.tileMax, tile.corruption + increase);
-    } else {
-      tile.corruption = Math.max(0, tile.corruption - decrease);
+    if (tile.corrupted) {
+      tile.corruption = Math.min(maxCorruption, Math.max(tile.corruption, 1) + spreadIncrease);
+      continue;
     }
-    tile.corrupted = tile.corruption > 0.0001;
+
+    if (tile.corrupting) {
+      tile.corruptProgress = Math.min(1, tile.corruptProgress + progressRate);
+    } else {
+      tile.corruptProgress = Math.max(0, tile.corruptProgress - decay);
+    }
+
+    tile.corruption = Math.max(0, tile.corruption - decay);
+    tile.corruption = Math.max(tile.corruption, tile.corruptProgress);
+
+    if (tile.corruptProgress >= 0.999) {
+      tile.corrupted = true;
+      tile.corruption = 1;
+      tile.corruptProgress = 1;
+      tile.corrupting = false;
+    } else if (tile.corruption <= 0.0001) {
+      tile.corruption = 0;
+    }
   }
 }
 
