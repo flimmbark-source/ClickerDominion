@@ -2,6 +2,13 @@ import type { BalanceConfig } from '../logic/balance';
 import { toScreen, toTile } from './isometric';
 import type { RenderEntity, RenderSnapshot, RenderTile } from './state';
 
+function formatClock(seconds: number): string {
+  const clamped = Math.max(0, seconds);
+  const minutes = Math.floor(clamped / 60);
+  const remainingSeconds = Math.floor(clamped % 60);
+  return `${minutes.toString().padStart(2, '0')}:${remainingSeconds.toString().padStart(2, '0')}`;
+}
+
 export class Renderer {
   private readonly canvas: HTMLCanvasElement;
   private readonly ctx: CanvasRenderingContext2D;
@@ -205,16 +212,18 @@ export class Renderer {
     const ctx = this.ctx;
     ctx.save();
     ctx.setTransform(1, 0, 0, 1, 0, 0);
-    ctx.fillStyle = '#ffffff';
-    ctx.font = '20px sans-serif';
-    ctx.fillText(`Doom Clock: ${snapshot.hud.doomClockSeconds.toFixed(1)}s`, 20, 30);
+    const doomColor = snapshot.hud.warn10 ? '#ff1744' : snapshot.hud.warn30 ? '#ffb347' : '#ffffff';
+    ctx.fillStyle = doomColor;
+    ctx.font = 'bold 32px sans-serif';
+    ctx.fillText(`Doom ${formatClock(snapshot.hud.doomClockSeconds)}`, 20, 40);
     if (snapshot.hud.warn30) {
-      ctx.fillStyle = snapshot.hud.warn10 ? '#ff1744' : '#ff9800';
-      ctx.fillRect(18, 36, 200, 4);
+      ctx.fillStyle = snapshot.hud.warn10 ? 'rgba(255, 23, 68, 0.35)' : 'rgba(255, 179, 71, 0.35)';
+      ctx.fillRect(20, 48, 220, 6);
     }
     ctx.fillStyle = '#ffffff';
-    ctx.fillText(`Dark Energy: ${snapshot.hud.darkEnergy.toFixed(1)}`, 20, 60);
-    ctx.fillText(`Gold: ${snapshot.hud.gold.toFixed(0)}`, 20, 90);
+    ctx.font = '20px sans-serif';
+    ctx.fillText(`Dark Energy: ${snapshot.hud.darkEnergy.toFixed(1)}`, 20, 80);
+    ctx.fillText(`Gold: ${snapshot.hud.gold.toFixed(0)}`, 20, 108);
     ctx.restore();
     void balance;
   }

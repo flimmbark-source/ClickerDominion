@@ -24,8 +24,14 @@
     "startSeconds": 180,
     "warn30": true,
     "warn10": true,
+    "baseDrainPerSecond": 1,
     "onMonsterKillSeconds": 0,
-    "drainPerActionSeconds": 0
+    "drainPerActionSeconds": 0,
+    "penalties": {
+      "townDamageSeconds": 0,
+      "corruptTileSeconds": 0,
+      "spawnWaveSeconds": 0
+    }
   },
   "clickCombat": {
     "baseDamage": 3,
