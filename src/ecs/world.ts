@@ -97,7 +97,7 @@ function baseRenderSnapshot(): RenderSnapshot {
     floating: [],
     hud: {
       doomClockSeconds: 0,
-      darkEnergy: 0,
+      darkEnergy: { value: 0, max: 1, markers: [] },
       gold: 0,
       warn30: false,
       warn10: false,
@@ -234,6 +234,11 @@ function spawnInitialEntities(world: World): void {
     value: 0,
     cadenceTicks: Math.max(1, Math.round(balance.darkEnergy.aiCadenceSeconds * balance.ticksPerSecond)),
     cadenceCounter: 0,
+    cooldowns: {
+      corruptTile: 0,
+      spawnWave: 0,
+      drainClock: 0,
+    },
   });
 
   // Initial monsters near the town

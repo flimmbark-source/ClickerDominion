@@ -2,10 +2,13 @@ import type { Entity, Transform } from '../ecs/components';
 import { getTile, gridIndex, removeEntity, spawnMonster, type FloatingNumber, type World } from '../ecs/world';
 import { consumeIntents, beginTick } from './intents';
 import { findPath } from './pathfinding';
+import type { DarkEnergyMarkerView } from '../render/state';
 
 export type System = (world: World) => void;
 
 type TownTarget = { entity: Entity; transform: Transform };
+
+type DarkActionKey = keyof World['balance']['darkEnergy']['actions'];
 
 export function createSystemPipeline(): System[] {
   return [
@@ -261,21 +264,28 @@ function handleTownContact(world: World, tileX: number, tileY: number, corruptin
 }
 
 function darkLordSystem(world: World): void {
-  const balance = world.balance;
   const dark = getDarkEnergy(world);
   if (!dark) {
     return;
   }
-  const corruptedTiles = world.grid.tiles.filter((tile) => tile.corrupted).length;
+  const balance = world.balance;
+  const secondsPerTick = 1 / balance.ticksPerSecond;
+  const corruptedTiles = world.grid.tiles.reduce((count, tile) => (tile.corrupted ? count + 1 : count), 0);
   const gainPerTick =
-    balance.darkEnergy.baseGainPerSecond / balance.ticksPerSecond +
-    (corruptedTiles * balance.darkEnergy.perCorruptedTileGain) / balance.ticksPerSecond;
+    balance.darkEnergy.baseGainPerSecond * secondsPerTick +
+    corruptedTiles * balance.darkEnergy.perCorruptedTileGain * secondsPerTick;
   dark.value += gainPerTick;
+
+  for (const key of Object.keys(dark.cooldowns) as DarkActionKey[]) {
+    if (dark.cooldowns[key] > 0) {
+      dark.cooldowns[key] -= 1;
+    }
+  }
 
   dark.cadenceCounter += 1;
   if (dark.cadenceCounter >= dark.cadenceTicks) {
     dark.cadenceCounter = 0;
-    executeDarkLordAction(world, dark.value);
+    executeDarkLordAction(world);
   }
 }
 
@@ -403,9 +413,16 @@ function renderSyncSystem(world: World): void {
 
   const doom = Array.from(world.components.doomClock.values())[0];
   const dark = getDarkEnergy(world);
+  const darkValue = dark?.value ?? 0;
+  const markers = createDarkEnergyMarkers(world, dark);
+  const meterMax = computeDarkEnergyMeterMax(darkValue, markers);
   snapshot.hud = {
     doomClockSeconds: doom?.seconds ?? 0,
-    darkEnergy: dark?.value ?? 0,
+    darkEnergy: {
+      value: darkValue,
+      max: meterMax,
+      markers,
+    },
     gold: world.economy.gold,
     warn30: (doom?.seconds ?? 0) <= world.balance.ui.flashThresholds.t30,
     warn10: (doom?.seconds ?? 0) <= world.balance.ui.flashThresholds.t10,
@@ -520,22 +537,34 @@ function getDarkEnergy(world: World) {
   return null;
 }
 
-function executeDarkLordAction(world: World, availableEnergy: number): void {
+function executeDarkLordAction(world: World): void {
   const balance = world.balance;
   const dark = getDarkEnergy(world);
   if (!dark) return;
-  if (availableEnergy >= balance.darkEnergy.actions.corruptTile.cost) {
-    if (tryCorruptTile(world)) {
-      dark.value -= balance.darkEnergy.actions.corruptTile.cost;
+
+  const priorities: DarkActionKey[] = ['corruptTile', 'spawnWave'];
+  for (const action of priorities) {
+    const config = balance.darkEnergy.actions[action];
+    if (!config) {
+      continue;
+    }
+    if (dark.value < config.cost) {
+      continue;
+    }
+    if (dark.cooldowns[action] > 0) {
+      continue;
+    }
+    if (action === 'corruptTile' && tryCorruptTile(world)) {
+      dark.value -= config.cost;
+      setActionCooldown(world, dark, action);
       if (balance.doomClock.penalties.corruptTileSeconds > 0) {
         adjustDoomClock(world, -balance.doomClock.penalties.corruptTileSeconds);
       }
       return;
     }
-  }
-  if (availableEnergy >= balance.darkEnergy.actions.spawnWave.cost) {
-    if (trySpawnWave(world)) {
-      dark.value -= balance.darkEnergy.actions.spawnWave.cost;
+    if (action === 'spawnWave' && trySpawnWave(world)) {
+      dark.value -= config.cost;
+      setActionCooldown(world, dark, action);
       if (balance.doomClock.penalties.spawnWaveSeconds > 0) {
         adjustDoomClock(world, -balance.doomClock.penalties.spawnWaveSeconds);
       }
@@ -545,44 +574,147 @@ function executeDarkLordAction(world: World, availableEnergy: number): void {
 }
 
 function tryCorruptTile(world: World): boolean {
-  const tiles = world.grid.tiles;
-  for (const tile of tiles) {
-    if (tile.corruption < world.balance.corruption.tileMax) {
-      tile.corruption = Math.min(
-        world.balance.corruption.tileMax,
-        tile.corruption + world.balance.corruption.tileIncreasePerTick * 5,
-      );
-      tile.corrupted = tile.corruption > 0.0001;
-      return true;
-    }
+  const maxCorruption = world.balance.corruption.tileMax;
+  const indices = Array.from({ length: world.grid.tiles.length }, (_, idx) => idx);
+  shuffleInPlace(indices, world.rng);
+
+  const towns = indices.filter((idx) => {
+    const tile = world.grid.tiles[idx];
+    return tile.type === 'town' && !tile.corrupted;
+  });
+
+  if (towns.length > 0) {
+    const tile = world.grid.tiles[towns[0]];
+    tile.corruptProgress = 1;
+    tile.corruption = Math.min(maxCorruption, Math.max(tile.corruption, 1));
+    tile.corrupted = true;
+    tile.corrupting = false;
+    return true;
   }
-  return false;
+
+  const candidates = indices.filter((idx) => {
+    const tile = world.grid.tiles[idx];
+    return tile.corruption < maxCorruption || !tile.corrupted;
+  });
+  if (candidates.length === 0) {
+    return false;
+  }
+
+  const tile = world.grid.tiles[candidates[0]];
+  const increment = world.balance.corruption.tileIncreasePerTick * world.balance.ticksPerSecond;
+  tile.corruption = Math.min(maxCorruption, tile.corruption + increment);
+  tile.corruptProgress = Math.min(1, Math.max(tile.corruptProgress, tile.corruption));
+  tile.corrupted = tile.corruption >= 0.999;
+  tile.corrupting = true;
+  return true;
 }
 
 function trySpawnWave(world: World): boolean {
-  const town = Array.from(world.components.town.keys())[0];
-  if (!town) return false;
-  const townTransform = world.components.transforms.get(town);
-  if (!townTransform) return false;
   const balance = world.balance;
-  const padding = balance.darkEnergy.actions.spawnWave.wave.spawnEdgePadding;
-  const positions: Array<{ x: number; y: number }> = [];
-  for (let x = padding; x < world.grid.width - padding; x += 1) {
-    positions.push({ x, y: padding });
-    positions.push({ x, y: world.grid.height - padding - 1 });
-  }
-  for (let y = padding + 1; y < world.grid.height - padding - 1; y += 1) {
-    positions.push({ x: padding, y });
-    positions.push({ x: world.grid.width - padding - 1, y });
-  }
-  if (positions.length === 0) {
+  const wave = balance.darkEnergy.actions.spawnWave.wave;
+  const padding = wave.spawnEdgePadding;
+  if (world.grid.width <= padding * 2 || world.grid.height <= padding * 2) {
     return false;
   }
-  for (let i = 0; i < balance.darkEnergy.actions.spawnWave.wave.size; i += 1) {
-    const pos = positions[(i + world.time.tick) % positions.length];
-    spawnMonster(world, pos.x, pos.y, balance.darkEnergy.actions.spawnWave.wave.monsterKind);
+
+  const candidates: Array<{ x: number; y: number }> = [];
+  for (let x = padding; x < world.grid.width - padding; x += 1) {
+    candidates.push({ x, y: padding });
+    candidates.push({ x, y: world.grid.height - padding - 1 });
   }
-  return true;
+  for (let y = padding + 1; y < world.grid.height - padding - 1; y += 1) {
+    candidates.push({ x: padding, y });
+    candidates.push({ x: world.grid.width - padding - 1, y });
+  }
+  if (candidates.length === 0) {
+    return false;
+  }
+
+  shuffleInPlace(candidates, world.rng);
+
+  const occupied = new Set<number>();
+  for (const transform of world.components.transforms.values()) {
+    occupied.add(gridIndex(world.grid, transform.tileX, transform.tileY));
+  }
+
+  let spawned = 0;
+  for (const candidate of candidates) {
+    if (spawned >= wave.size) {
+      break;
+    }
+    const idx = gridIndex(world.grid, candidate.x, candidate.y);
+    if (occupied.has(idx)) {
+      continue;
+    }
+    spawnMonster(world, candidate.x, candidate.y, wave.monsterKind);
+    occupied.add(idx);
+    spawned += 1;
+  }
+  return spawned > 0;
+}
+
+function setActionCooldown(world: World, dark: NonNullable<ReturnType<typeof getDarkEnergy>>, action: DarkActionKey): void {
+  const ticks = actionCooldownTicks(world, action);
+  dark.cooldowns[action] = ticks;
+}
+
+function actionCooldownTicks(world: World, action: DarkActionKey): number {
+  const seconds = world.balance.darkEnergy.actions[action]?.cooldownSeconds ?? 0;
+  if (seconds <= 0) {
+    return 0;
+  }
+  return Math.max(0, Math.round(seconds * world.balance.ticksPerSecond));
+}
+
+function shuffleInPlace<T>(items: T[], rng: World['rng']): void {
+  for (let i = items.length - 1; i > 0; i -= 1) {
+    const j = Math.floor(rng.range(0, i + 1));
+    const tmp = items[i];
+    items[i] = items[j];
+    items[j] = tmp;
+  }
+}
+
+function createDarkEnergyMarkers(
+  world: World,
+  dark: ReturnType<typeof getDarkEnergy>,
+): DarkEnergyMarkerView[] {
+  const balance = world.balance;
+  const entries = Object.entries(balance.darkEnergy.actions) as Array<[
+    DarkActionKey,
+    { cost: number; cooldownSeconds: number },
+  ]>;
+  const markers = entries.map(([key, config]) => {
+    const cooldownTicks = dark ? dark.cooldowns[key] : 0;
+    return {
+      value: config.cost,
+      label: formatActionLabel(key),
+      ready: Boolean(dark && dark.value >= config.cost && cooldownTicks <= 0),
+      cooldownSeconds: cooldownTicks / world.balance.ticksPerSecond,
+    } satisfies DarkEnergyMarkerView;
+  });
+  markers.sort((a, b) => a.value - b.value || a.label.localeCompare(b.label));
+  return markers;
+}
+
+function computeDarkEnergyMeterMax(value: number, markers: DarkEnergyMarkerView[]): number {
+  const maxMarker = markers.reduce((max, marker) => Math.max(max, marker.value), 0);
+  const base = Math.max(maxMarker, value, 1);
+  const padded = Math.ceil((base * 1.05) / 5) * 5;
+  return padded;
+}
+
+function formatActionLabel(action: DarkActionKey): string {
+  switch (action) {
+    case 'corruptTile':
+      return 'Corrupt Tile';
+    case 'spawnWave':
+      return 'Spawn Wave';
+    case 'drainClock':
+      return 'Drain Clock';
+    default:
+      return action;
+  }
 }
 
 function adjustDoomClock(world: World, deltaSeconds: number): void {
