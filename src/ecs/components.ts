@@ -57,6 +57,11 @@ export interface DarkEnergy {
   value: number;
   cadenceTicks: number;
   cadenceCounter: number;
+  cooldowns: {
+    corruptTile: number;
+    spawnWave: number;
+    drainClock: number;
+  };
 }
 
 export interface SpawnPoint {

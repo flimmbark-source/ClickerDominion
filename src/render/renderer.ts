@@ -16,6 +16,8 @@ export class Renderer {
   private height = 0;
   private offsetX = 0;
   private offsetY = 0;
+  private scale = 1;
+  private dpr = 1;
   private hoverTile: { tileX: number; tileY: number } | null = null;
 
   constructor(canvas: HTMLCanvasElement, balance: BalanceConfig) {
@@ -31,9 +33,10 @@ export class Renderer {
 
   render(snapshot: RenderSnapshot, balance: BalanceConfig): void {
     const ctx = this.ctx;
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
     ctx.clearRect(0, 0, this.width, this.height);
     ctx.save();
-    ctx.translate(this.offsetX, this.offsetY);
+    ctx.setTransform(this.scale, 0, 0, this.scale, this.offsetX, this.offsetY);
 
     const sortedTiles = [...snapshot.tiles].sort((a, b) => (a.tileY - b.tileY) || (a.tileX - b.tileX));
     for (const tile of sortedTiles) {
@@ -67,14 +70,14 @@ export class Renderer {
   }
 
   private resize(balance: BalanceConfig): void {
-    const dpr = window.devicePixelRatio || 1;
-    this.width = Math.floor(window.innerWidth * dpr);
-    this.height = Math.floor(window.innerHeight * dpr);
+    this.dpr = window.devicePixelRatio || 1;
+    this.width = Math.floor(window.innerWidth * this.dpr);
+    this.height = Math.floor(window.innerHeight * this.dpr);
     this.canvas.width = this.width;
     this.canvas.height = this.height;
-    this.canvas.style.width = `${Math.floor(this.width / dpr)}px`;
-    this.canvas.style.height = `${Math.floor(this.height / dpr)}px`;
-    this.ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    this.canvas.style.width = `${Math.floor(this.width / this.dpr)}px`;
+    this.canvas.style.height = `${Math.floor(this.height / this.dpr)}px`;
+    this.ctx.setTransform(1, 0, 0, 1, 0, 0);
     this.ctx.imageSmoothingEnabled = false;
     const { tileWidth, tileHeight } = balance.iso;
     const halfW = tileWidth / 2;
@@ -93,8 +96,13 @@ export class Renderer {
     const maxBoundY = Math.max(...corners.map((corner) => corner.y + halfH));
     const centerX = (minBoundX + maxBoundX) / 2;
     const centerY = (minBoundY + maxBoundY) / 2;
-    this.offsetX = this.width / 2 - centerX;
-    this.offsetY = this.height / 2 - centerY;
+    const mapWidth = Math.max(1, maxBoundX - minBoundX);
+    const mapHeight = Math.max(1, maxBoundY - minBoundY);
+    const scaleX = this.width / mapWidth;
+    const scaleY = this.height / mapHeight;
+    this.scale = Math.min(scaleX, scaleY) * 0.98;
+    this.offsetX = this.width / 2 - centerX * this.scale;
+    this.offsetY = this.height / 2 - centerY * this.scale;
   }
 
   setHoverTile(tile: { tileX: number; tileY: number } | null): void {
@@ -250,7 +258,7 @@ export class Renderer {
   private drawHud(snapshot: RenderSnapshot, balance: BalanceConfig): void {
     const ctx = this.ctx;
     ctx.save();
-    ctx.setTransform(1, 0, 0, 1, 0, 0);
+    ctx.setTransform(this.dpr, 0, 0, this.dpr, 0, 0);
     const doomColor = snapshot.hud.warn10 ? '#ff1744' : snapshot.hud.warn30 ? '#ffb347' : '#ffffff';
     ctx.fillStyle = doomColor;
     ctx.font = 'bold 32px sans-serif';
@@ -259,17 +267,45 @@ export class Renderer {
       ctx.fillStyle = snapshot.hud.warn10 ? 'rgba(255, 23, 68, 0.35)' : 'rgba(255, 179, 71, 0.35)';
       ctx.fillRect(20, 48, 220, 6);
     }
+    const meter = snapshot.hud.darkEnergy;
+    const meterWidth = 260;
+    const meterHeight = 12;
+    const meterX = 20;
+    const meterY = 86;
+    const maxValue = Math.max(1, meter.max);
+    const ratio = Math.max(0, Math.min(1, meter.value / maxValue));
     ctx.fillStyle = '#ffffff';
     ctx.font = '20px sans-serif';
-    ctx.fillText(`Dark Energy: ${snapshot.hud.darkEnergy.toFixed(1)}`, 20, 80);
-    ctx.fillText(`Gold: ${snapshot.hud.gold.toFixed(0)}`, 20, 108);
+    ctx.fillText(`Dark Energy ${meter.value.toFixed(1)} / ${meter.max.toFixed(0)}`, meterX, meterY - 12);
+    ctx.fillStyle = 'rgba(255, 255, 255, 0.15)';
+    ctx.fillRect(meterX, meterY, meterWidth, meterHeight);
+    ctx.fillStyle = '#7c4dff';
+    ctx.fillRect(meterX, meterY, meterWidth * ratio, meterHeight);
+    for (const marker of meter.markers) {
+      const markerRatio = Math.max(0, Math.min(1, marker.value / maxValue));
+      const markerX = meterX + markerRatio * meterWidth;
+      ctx.beginPath();
+      ctx.moveTo(markerX, meterY - 4);
+      ctx.lineTo(markerX, meterY + meterHeight + 4);
+      ctx.strokeStyle = marker.ready ? '#aeea00' : 'rgba(255,255,255,0.6)';
+      ctx.lineWidth = marker.ready ? 2 : 1;
+      ctx.stroke();
+      const cdSeconds = Math.ceil(marker.cooldownSeconds);
+      const cdText = marker.ready || cdSeconds <= 0 ? '' : ` (${cdSeconds}s)`;
+      ctx.fillStyle = marker.ready ? '#aeea00' : '#ffffff';
+      ctx.font = '12px sans-serif';
+      ctx.fillText(`${marker.label}${cdText}`, markerX + 6, meterY + meterHeight + 18);
+    }
+    ctx.fillStyle = '#ffffff';
+    ctx.font = '20px sans-serif';
+    ctx.fillText(`Gold: ${snapshot.hud.gold.toFixed(0)}`, 20, meterY + meterHeight + 48);
     ctx.restore();
     void balance;
   }
 
   screenToTile(screenX: number, screenY: number, balance: BalanceConfig): { tileX: number; tileY: number } {
-    const isoX = screenX - this.offsetX;
-    const isoY = screenY - this.offsetY;
+    const isoX = (screenX - this.offsetX) / this.scale;
+    const isoY = (screenY - this.offsetY) / this.scale;
     return toTile(isoX, isoY, balance);
   }
 }

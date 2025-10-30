@@ -28,9 +28,22 @@ export interface FloatingNumberView {
   crit: boolean;
 }
 
+export interface DarkEnergyMarkerView {
+  value: number;
+  label: string;
+  ready: boolean;
+  cooldownSeconds: number;
+}
+
+export interface DarkEnergyHudView {
+  value: number;
+  max: number;
+  markers: DarkEnergyMarkerView[];
+}
+
 export interface HudState {
   doomClockSeconds: number;
-  darkEnergy: number;
+  darkEnergy: DarkEnergyHudView;
   gold: number;
   warn30: boolean;
   warn10: boolean;
