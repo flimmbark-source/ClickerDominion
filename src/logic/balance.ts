@@ -20,8 +20,14 @@ export interface BalanceConfig {
     startSeconds: number;
     warn30: boolean;
     warn10: boolean;
+    baseDrainPerSecond: number;
     onMonsterKillSeconds: number;
     drainPerActionSeconds: number;
+    penalties: {
+      townDamageSeconds: number;
+      corruptTileSeconds: number;
+      spawnWaveSeconds: number;
+    };
   };
   clickCombat: {
     baseDamage: number;

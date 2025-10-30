@@ -8,6 +8,7 @@ export type System = (world: World) => void;
 export function createSystemPipeline(): System[] {
   return [
     timeSystem,
+    doomClockSystem,
     inputIntentSystem,
     combatResolutionSystem,
     statusEffectSystem,
@@ -24,10 +25,6 @@ function timeSystem(world: World): void {
   beginTick(world.intents);
   world.time.tick += 1;
   world.time.seconds = world.time.tick / world.balance.ticksPerSecond;
-  const secondsPerTick = 1 / world.balance.ticksPerSecond;
-  for (const doom of world.components.doomClock.values()) {
-    doom.seconds = Math.max(0, doom.seconds - secondsPerTick);
-  }
 
   for (let i = world.floatingNumbers.length - 1; i >= 0; i -= 1) {
     const fn = world.floatingNumbers[i];
@@ -36,6 +33,15 @@ function timeSystem(world: World): void {
       world.floatingNumbers.splice(i, 1);
     }
   }
+}
+
+function doomClockSystem(world: World): void {
+  const drain = world.balance.doomClock.baseDrainPerSecond;
+  if (drain <= 0) {
+    return;
+  }
+  const secondsPerTick = 1 / world.balance.ticksPerSecond;
+  adjustDoomClock(world, -drain * secondsPerTick);
 }
 
 function inputIntentSystem(world: World): void {
@@ -61,10 +67,16 @@ function combatResolutionSystem(world: World): void {
   for (const click of clicks) {
     const target = findTopClickable(world, click.tileX, click.tileY);
     if (!target) {
+      if (balance.doomClock.drainPerActionSeconds > 0) {
+        adjustDoomClock(world, -balance.doomClock.drainPerActionSeconds);
+      }
       continue;
     }
     const health = world.components.health.get(target);
     if (!health) {
+      if (balance.doomClock.drainPerActionSeconds > 0) {
+        adjustDoomClock(world, -balance.doomClock.drainPerActionSeconds);
+      }
       continue;
     }
     const { damage, crit } = computeClickDamage(world);
@@ -74,25 +86,14 @@ function combatResolutionSystem(world: World): void {
     }
     if (health.hp <= 0) {
       onEntityDefeated(world, target);
-      for (const doom of world.components.doomClock.values()) {
-        doom.seconds = Math.max(0, doom.seconds + balance.doomClock.onMonsterKillSeconds);
-      }
+      adjustDoomClock(world, balance.doomClock.onMonsterKillSeconds);
       const dark = getDarkEnergy(world);
       if (dark) {
         dark.value += balance.darkEnergy.perMonsterKillGain;
       }
     }
-  }
-  // degrade ability cooldowns implicitly via status system
-  for (const doom of world.components.doomClock.values()) {
-    doom.seconds = Math.max(0, doom.seconds);
-  }
-  // reduce doom per action if configured
-  if (balance.doomClock.drainPerActionSeconds > 0) {
-    for (const _ of clicks) {
-      for (const doom of world.components.doomClock.values()) {
-        doom.seconds = Math.max(0, doom.seconds - balance.doomClock.drainPerActionSeconds);
-      }
+    if (balance.doomClock.drainPerActionSeconds > 0) {
+      adjustDoomClock(world, -balance.doomClock.drainPerActionSeconds);
     }
   }
 }
@@ -195,6 +196,9 @@ function monsterAiSystem(world: World): void {
         town.integrity = Math.max(0, town.integrity - balance.monsters.base.attack.damage);
         if (town.integrity === 0) {
           world.components.town.delete(townEntity);
+        }
+        if (balance.doomClock.penalties.townDamageSeconds > 0) {
+          adjustDoomClock(world, -balance.doomClock.penalties.townDamageSeconds);
         }
       }
     }
@@ -452,12 +456,18 @@ function executeDarkLordAction(world: World, availableEnergy: number): void {
   if (availableEnergy >= balance.darkEnergy.actions.corruptTile.cost) {
     if (tryCorruptTile(world)) {
       dark.value -= balance.darkEnergy.actions.corruptTile.cost;
+      if (balance.doomClock.penalties.corruptTileSeconds > 0) {
+        adjustDoomClock(world, -balance.doomClock.penalties.corruptTileSeconds);
+      }
       return;
     }
   }
   if (availableEnergy >= balance.darkEnergy.actions.spawnWave.cost) {
     if (trySpawnWave(world)) {
       dark.value -= balance.darkEnergy.actions.spawnWave.cost;
+      if (balance.doomClock.penalties.spawnWaveSeconds > 0) {
+        adjustDoomClock(world, -balance.doomClock.penalties.spawnWaveSeconds);
+      }
       return;
     }
   }
@@ -502,4 +512,13 @@ function trySpawnWave(world: World): boolean {
     spawnMonster(world, pos.x, pos.y, balance.darkEnergy.actions.spawnWave.wave.monsterKind);
   }
   return true;
+}
+
+function adjustDoomClock(world: World, deltaSeconds: number): void {
+  if (deltaSeconds === 0) {
+    return;
+  }
+  for (const doom of world.components.doomClock.values()) {
+    doom.seconds = Math.max(0, doom.seconds + deltaSeconds);
+  }
 }
