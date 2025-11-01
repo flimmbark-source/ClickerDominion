@@ -11,7 +11,7 @@ export interface SpriteFrame {
 }
 
 export type MonsterSpriteId = `monster-${MonsterKind}`;
-export type SpriteId = 'hero' | 'town' | 'loot' | 'villager' | MonsterSpriteId;
+export type SpriteId = 'hero' | 'town' | 'loot' | 'villager' | 'militia' | MonsterSpriteId;
 export type SpriteAtlas = Record<SpriteId, SpriteFrame>;
 
 let atlasPromise: Promise<SpriteAtlas> | null = null;
@@ -36,6 +36,11 @@ const SPRITE_SOURCES: Record<SpriteId, SpriteSource> = {
     anchorYRatio: 1,
   },
   villager: {
+    src: '/assets/entities/Villager.png',
+    anchorXRatio: 0.4775,
+    anchorYRatio: 1,
+  },
+  militia: {
     src: '/assets/entities/Villager.png',
     anchorXRatio: 0.4775,
     anchorYRatio: 1,

@@ -4,7 +4,7 @@ import type { GameEventMessage } from '../logic/events/GameEvents';
 import type { RenderSnapshot } from '../render/state';
 import { RNG } from '../utils/rng';
 import { EntityManager } from '../logic/simulation/EntityManager';
-import { Village, Villager } from '../logic/simulation/entities';
+import { Village, Villager, type TilePosition } from '../logic/simulation/entities';
 import { ResourceTile, type ResourceTileState } from '../logic/simulation/ResourceTile';
 import {
   type ComponentStores,
@@ -16,6 +16,8 @@ import {
   type MonsterTag,
   type HeroState,
   type MonsterState,
+  type MilitiaTag,
+  type MilitiaState,
   type Town,
   type DoomClock,
   type DarkEnergy,
@@ -180,6 +182,8 @@ export function removeEntity(world: World, entity: Entity): void {
   components.monsterState.delete(entity);
   components.hero.delete(entity);
   components.heroState.delete(entity);
+  components.militia.delete(entity);
+  components.militiaState.delete(entity);
   components.town.delete(entity);
   components.corruption.delete(entity);
   components.rallyAura.delete(entity);
@@ -212,6 +216,11 @@ function addMonster(world: World, entity: Entity, data: MonsterTag, state: Monst
 function addHero(world: World, entity: Entity, state: HeroState): void {
   world.components.hero.add(entity);
   world.components.heroState.set(entity, state);
+}
+
+function addMilitia(world: World, entity: Entity, tag: MilitiaTag, state: MilitiaState): void {
+  world.components.militia.set(entity, tag);
+  world.components.militiaState.set(entity, state);
 }
 
 function addTown(world: World, entity: Entity, data: Town): void {
@@ -361,6 +370,14 @@ export function spawnVillager(world: World, villageEntity: Entity): Entity | nul
     0,
     Math.round(world.balance.villagers.idleSecondsBetweenJobs * world.balance.ticksPerSecond),
   );
+  const panicStaminaTicks = Math.max(
+    1,
+    Math.round(world.balance.villagers.panicStaminaSeconds * world.balance.ticksPerSecond),
+  );
+  const panicRestTicks = Math.max(
+    1,
+    Math.round(world.balance.villagers.panicRestSeconds * world.balance.ticksPerSecond),
+  );
 
   const villager = new Villager({
     entityId: entity,
@@ -369,10 +386,69 @@ export function spawnVillager(world: World, villageEntity: Entity): Entity | nul
     depositTicks,
     carryCapacity: world.balance.villagers.carryCapacity,
     idleTicksBetweenJobs: idleTicks,
+    panicStaminaTicks,
+    panicRestTicks,
+    panicSpeedMultiplier: world.balance.villagers.panicSpeedMultiplier,
+    panicThreatEscalationCount: world.balance.villagers.panicThreatEscalationCount,
   });
 
   world.components.villagers.set(entity, villager);
   world.entityManager.registerVillager(entity, villageEntity);
+  return entity;
+}
+
+export function spawnMilitia(world: World, villageEntity: Entity): Entity | null {
+  const villageTransform = world.components.transforms.get(villageEntity);
+  if (!villageTransform) {
+    return null;
+  }
+
+  if (world.entityManager.getActiveMilitiaCount(villageEntity) >= 1) {
+    return null;
+  }
+
+  const spawnTile = findMilitiaSpawnTile(world, villageTransform.tileX, villageTransform.tileY);
+  if (!spawnTile) {
+    return null;
+  }
+
+  const entity = createEntity(world);
+  addTransform(world, entity, { tileX: spawnTile.x, tileY: spawnTile.y });
+  addRenderIso(world, entity, { spriteId: 'militia' });
+  addHealth(world, entity, { hp: world.balance.militia.hp, max: world.balance.militia.hp });
+
+  const patrolRoute = buildMilitiaPatrolRoute(world, villageTransform.tileX, villageTransform.tileY);
+  const moveDelay = Math.max(
+    1,
+    Math.round(world.balance.militia.moveIntervalSeconds * world.balance.ticksPerSecond),
+  );
+  const attackDelay = Math.max(
+    1,
+    Math.round(world.balance.militia.attackCooldownSeconds * world.balance.ticksPerSecond),
+  );
+  const pauseTicks = Math.max(
+    0,
+    Math.round(world.balance.militia.patrolPauseSeconds * world.balance.ticksPerSecond),
+  );
+
+  addMilitia(
+    world,
+    entity,
+    { villageId: villageEntity },
+    {
+      moveCooldown: 0,
+      attackCooldown: 0,
+      moveInterval: moveDelay,
+      attackInterval: attackDelay,
+      patrolRoute,
+      patrolIndex: 0,
+      pauseTimer: pauseTicks,
+      pauseDuration: pauseTicks,
+      behavior: { type: 'patrol' },
+    },
+  );
+
+  world.entityManager.registerMilitia(entity, villageEntity);
   return entity;
 }
 
@@ -394,4 +470,86 @@ export function spawnMonster(world: World, tileX: number, tileY: number, kind: M
   });
   world.components.clickable.add(entity);
   return entity;
+}
+
+function findMilitiaSpawnTile(world: World, centerX: number, centerY: number): TilePosition | null {
+  const neighbors = militiaNeighborTiles(world, centerX, centerY);
+  const prioritized = neighbors.sort((a, b) => {
+    const aTile = getTile(world.grid, a.x, a.y);
+    const bTile = getTile(world.grid, b.x, b.y);
+    const aScore = militiaSpawnScore(aTile);
+    const bScore = militiaSpawnScore(bTile);
+    if (aScore === bScore) {
+      return 0;
+    }
+    return bScore - aScore;
+  });
+
+  for (const candidate of prioritized) {
+    const tile = getTile(world.grid, candidate.x, candidate.y);
+    if (!tile || tile.type === 'town') {
+      continue;
+    }
+    if (!isTileOccupied(world, candidate.x, candidate.y)) {
+      return candidate;
+    }
+  }
+
+  if (!isTileOccupied(world, centerX, centerY)) {
+    return { x: centerX, y: centerY };
+  }
+
+  return null;
+}
+
+function buildMilitiaPatrolRoute(world: World, centerX: number, centerY: number): TilePosition[] {
+  const tiles = militiaNeighborTiles(world, centerX, centerY);
+  if (tiles.length === 0) {
+    return [{ x: centerX, y: centerY }];
+  }
+  return tiles;
+}
+
+function militiaNeighborTiles(world: World, x: number, y: number): TilePosition[] {
+  const results: TilePosition[] = [];
+  const deltas = [
+    { x: 1, y: 0 },
+    { x: -1, y: 0 },
+    { x: 0, y: 1 },
+    { x: 0, y: -1 },
+  ];
+  for (const delta of deltas) {
+    const nx = x + delta.x;
+    const ny = y + delta.y;
+    if (nx < 0 || ny < 0 || nx >= world.grid.width || ny >= world.grid.height) {
+      continue;
+    }
+    results.push({ x: nx, y: ny });
+  }
+  return results;
+}
+
+function militiaSpawnScore(tile: TileState | undefined): number {
+  if (!tile) {
+    return 0;
+  }
+  if (tile.type === 'road') {
+    return 3;
+  }
+  if (tile.type === 'plain') {
+    return 2;
+  }
+  if (tile.type === 'resource') {
+    return 1;
+  }
+  return 0;
+}
+
+function isTileOccupied(world: World, x: number, y: number): boolean {
+  for (const transform of world.components.transforms.values()) {
+    if (transform.tileX === x && transform.tileY === y) {
+      return true;
+    }
+  }
+  return false;
 }

@@ -1,16 +1,24 @@
-import type { Entity, MonsterBehaviorState, MonsterState, Transform } from '../ecs/components';
+import type {
+  Entity,
+  MonsterBehaviorState,
+  MonsterState,
+  Transform,
+  MilitiaState,
+  MilitiaTag,
+} from '../ecs/components';
 import {
   getTile,
   gridIndex,
   removeEntity,
   spawnMonster,
   spawnVillager,
+  spawnMilitia,
   type FloatingNumber,
   type World,
 } from '../ecs/world';
 import { consumeIntents, beginTick } from './intents';
 import { findPath, findPathBfs } from './pathfinding';
-import { GameEvent, type GameEventPayloads } from './events/GameEvents';
+import { GameEvent, type GameEventPayloads, type GameEventMessage } from './events/GameEvents';
 import type { DarkEnergyMarkerView } from '../render/state';
 import type { VillageMood, TilePosition } from './simulation/entities';
 import type { ResourceType, MonsterKind } from './balance';
@@ -28,6 +36,7 @@ export function createSystemPipeline(): System[] {
     statusEffectSystem,
     villageSystem,
     villagerAiSystem,
+    militiaAiSystem,
     monsterAiSystem,
     darkLordSystem,
     corruptionSystem,
@@ -173,6 +182,14 @@ function villageSystem(world: World): void {
     village.tick({
       spawnVillager: () => spawnVillager(world, entity),
     });
+    const threshold = world.balance.militia.autoSpawnStockpileThreshold;
+    if (
+      threshold >= 0 &&
+      village.resourceStockpile > threshold &&
+      world.entityManager.getActiveMilitiaCount(entity) === 0
+    ) {
+      spawnMilitia(world, entity);
+    }
   }
 }
 
@@ -195,14 +212,28 @@ function villagerAiSystem(world: World): void {
       continue;
     }
 
-    if (
-      fleeRadius > 0 &&
-      villager.state.type !== 'fleeing' &&
-      hasNearbyThreat(world, transform.tileX, transform.tileY, fleeRadius)
-    ) {
-      const pathToHome = computePath(world, transform.tileX, transform.tileY, homeTransform.tileX, homeTransform.tileY);
-      if (pathToHome) {
-        villager.startFleeing(pathToHome);
+    const threatInfo = findNearestMonsterInfo(world, transform.tileX, transform.tileY);
+    const currentThreatDistance = threatInfo?.distance ?? null;
+    const threatened =
+      fleeRadius > 0 && currentThreatDistance !== null && currentThreatDistance <= fleeRadius;
+
+    if (!threatened && villager.state.type !== 'fleeing') {
+      villager.resetThreatTracking();
+    }
+
+    if (threatened && villager.state.type !== 'fleeing') {
+      const escape = findNearestVillageEscapePath(world, transform.tileX, transform.tileY);
+      if (escape) {
+        villager.startFleeing(escape.path, villager.panicActive);
+        villager.lastThreatDistance = currentThreatDistance;
+      }
+    }
+
+    if (villager.state.type === 'resting' && threatened) {
+      const escape = findNearestVillageEscapePath(world, transform.tileX, transform.tileY);
+      if (escape) {
+        villager.startFleeing(escape.path, villager.panicActive);
+        villager.lastThreatDistance = currentThreatDistance;
       }
     }
 
@@ -356,25 +387,171 @@ function villagerAiSystem(world: World): void {
       }
 
       case 'fleeing': {
-        if (villager.state.path.length > 0) {
+        const stepsPerTick = villager.panicActive
+          ? Math.max(1, villager.panicSpeedMultiplier)
+          : 1;
+        let stepsTaken = 0;
+        while (stepsTaken < stepsPerTick && villager.state.path.length > 0) {
           const next = villager.state.path.shift();
-          if (next) {
-            transform.tileX = next.x;
-            transform.tileY = next.y;
+          if (!next) {
+            break;
+          }
+          transform.tileX = next.x;
+          transform.tileY = next.y;
+          stepsTaken += 1;
+        }
+        if (stepsTaken > 0) {
+          villager.consumePanicStamina(stepsTaken);
+        }
+
+        const updatedThreat = findNearestMonsterInfo(world, transform.tileX, transform.tileY);
+        const updatedDistance = updatedThreat?.distance ?? null;
+
+        if (updatedDistance === null) {
+          villager.resetThreatTracking();
+        } else {
+          if (villager.lastThreatDistance !== null && updatedDistance < villager.lastThreatDistance) {
+            villager.threatCloseCounter += 1;
+          } else if (
+            villager.lastThreatDistance !== null &&
+            updatedDistance >= villager.lastThreatDistance
+          ) {
+            villager.threatCloseCounter = Math.max(0, villager.threatCloseCounter - 1);
+          }
+          if (
+            !villager.panicActive &&
+            villager.threatCloseCounter >= villager.panicThreatEscalationCount
+          ) {
+            villager.enterPanic();
           }
         }
+        villager.lastThreatDistance = updatedDistance;
+
+        const stillThreatened =
+          fleeRadius > 0 && updatedDistance !== null && updatedDistance <= fleeRadius;
+        const atHome =
+          transform.tileX === homeTransform.tileX && transform.tileY === homeTransform.tileY;
+        const onVillageTile = getTile(world.grid, transform.tileX, transform.tileY)?.type === 'town';
+
         if (villager.state.path.length === 0) {
-          if (transform.tileX === homeTransform.tileX && transform.tileY === homeTransform.tileY) {
+          if (stillThreatened) {
+            const escape = findNearestVillageEscapePath(world, transform.tileX, transform.tileY);
+            if (escape) {
+              villager.startFleeing(escape.path, villager.panicActive);
+              villager.lastThreatDistance = updatedDistance;
+            }
+            break;
+          }
+
+          if (villager.panicActive) {
+            villager.stopPanic();
+          }
+
+          if (villager.pendingRestTicks > 0) {
+            villager.startResting();
+            break;
+          }
+
+          if (!atHome && villager.carriedResource > 0) {
+            const pathHome = computePath(
+              world,
+              transform.tileX,
+              transform.tileY,
+              homeTransform.tileX,
+              homeTransform.tileY,
+            );
+            if (pathHome && pathHome.length > 0) {
+              villager.startReturnHome(pathHome);
+              break;
+            }
+          }
+
+          if (atHome) {
             if (villager.carriedResource > 0) {
               villager.startDepositing();
             } else {
               villager.setIdle();
             }
+          } else if (onVillageTile) {
+            villager.setIdle();
           } else {
             villager.setIdle();
           }
         }
         break;
+      }
+
+      case 'resting': {
+        if (villager.state.remainingTicks > 0) {
+          villager.state.remainingTicks -= 1;
+        }
+        if (villager.state.remainingTicks > 0) {
+          break;
+        }
+        const atHome =
+          transform.tileX === homeTransform.tileX && transform.tileY === homeTransform.tileY;
+        if (atHome && villager.carriedResource > 0) {
+          villager.startDepositing();
+        } else {
+          villager.setIdle();
+        }
+        break;
+      }
+    }
+  }
+}
+
+function militiaAiSystem(world: World): void {
+  if (world.components.militia.size === 0) {
+    return;
+  }
+
+  const attackDamage = Math.max(0, world.balance.militia.attackDamage);
+
+  for (const [entity, militia] of world.components.militia.entries()) {
+    const transform = world.components.transforms.get(entity);
+    const state = world.components.militiaState.get(entity);
+    if (!transform || !state) {
+      continue;
+    }
+
+    state.moveCooldown = Math.max(0, state.moveCooldown - 1);
+    state.attackCooldown = Math.max(0, state.attackCooldown - 1);
+    if (state.pauseTimer > 0) {
+      state.pauseTimer = Math.max(0, state.pauseTimer - 1);
+    }
+
+    const villageTransform = world.components.transforms.get(militia.villageId);
+    const intruder = findMonsterOnVillageTile(world, militia.villageId);
+    if (intruder) {
+      state.behavior = { type: 'engage', targetId: intruder };
+      state.pauseTimer = 0;
+    } else if (state.behavior.type === 'engage') {
+      const path = computeMilitiaReturnPath(world, transform, state, villageTransform);
+      if (path.length === 0) {
+        state.behavior = { type: 'patrol' };
+        state.pauseTimer = state.pauseDuration;
+      } else {
+        state.behavior = { type: 'return', path };
+      }
+    }
+
+    switch (state.behavior.type) {
+      case 'patrol': {
+        handleMilitiaPatrol(world, transform, state);
+        break;
+      }
+      case 'engage': {
+        handleMilitiaEngage(world, transform, state, attackDamage, villageTransform);
+        break;
+      }
+      case 'return': {
+        handleMilitiaReturn(world, transform, state);
+        break;
+      }
+      default: {
+        const exhaustive: never = state.behavior;
+        throw new Error(`Unhandled militia behavior ${(exhaustive as { type: string }).type}`);
       }
     }
   }
@@ -755,7 +932,8 @@ function emitGameEvent<K extends GameEvent>(
   type: K,
   payload: GameEventPayloads[K],
 ): void {
-  world.events.push({ type, payload });
+  const message: GameEventMessage = { type, payload } as GameEventMessage;
+  world.events.push(message);
 }
 
 function handleTownContact(world: World, tileX: number, tileY: number, corruptingTiles: Set<number>): void {
@@ -1016,12 +1194,25 @@ function renderSyncSystem(world: World): void {
         integrity: town.integrity,
       });
     } else if (world.components.villagers.has(entity)) {
+      const villager = world.components.villagers.get(entity)!;
       snapshot.entities.push({
         id: entity,
         tileX: transform.tileX,
         tileY: transform.tileY,
         spriteId: renderIso.spriteId,
         kind: 'villager',
+        panic: villager.panicActive,
+      });
+    } else if (world.components.militia.has(entity)) {
+      const health = world.components.health.get(entity);
+      snapshot.entities.push({
+        id: entity,
+        tileX: transform.tileX,
+        tileY: transform.tileY,
+        spriteId: renderIso.spriteId,
+        kind: 'militia',
+        hp: health?.hp,
+        hpMax: health?.max,
       });
     } else if (world.components.loot.has(entity)) {
       snapshot.entities.push({
@@ -1076,11 +1267,238 @@ function renderSyncSystem(world: World): void {
   };
 }
 
+interface MonsterThreatInfo {
+  entity: Entity;
+  distance: number;
+}
+
+interface VillageEscapePath {
+  path: TilePosition[];
+  target: TilePosition;
+}
+
 interface ResourceSearchResult {
   target: TilePosition;
   path: TilePosition[];
   resourceType: ResourceType;
   gatherTicks: number;
+}
+
+function findNearestMonsterInfo(world: World, x: number, y: number): MonsterThreatInfo | null {
+  let best: MonsterThreatInfo | null = null;
+  for (const [entity] of world.components.monster.entries()) {
+    const transform = world.components.transforms.get(entity);
+    if (!transform) {
+      continue;
+    }
+    const distance = Math.abs(transform.tileX - x) + Math.abs(transform.tileY - y);
+    if (!best || distance < best.distance) {
+      best = { entity, distance };
+    }
+  }
+  return best;
+}
+
+function findNearestVillageEscapePath(
+  world: World,
+  startX: number,
+  startY: number,
+): VillageEscapePath | null {
+  let best: { path: TilePosition[]; length: number; target: TilePosition } | null = null;
+  for (const [villageId] of world.components.villages.entries()) {
+    const transform = world.components.transforms.get(villageId);
+    if (!transform) {
+      continue;
+    }
+    const path = computePath(world, startX, startY, transform.tileX, transform.tileY);
+    if (!path) {
+      continue;
+    }
+    const length = path.length;
+    if (!best || length < best.length) {
+      best = {
+        path,
+        length,
+        target: { x: transform.tileX, y: transform.tileY },
+      };
+    }
+  }
+  return best ? { path: best.path, target: best.target } : null;
+}
+
+function handleMilitiaPatrol(world: World, transform: Transform, state: MilitiaState): void {
+  if (state.patrolRoute.length === 0) {
+    return;
+  }
+  const target = state.patrolRoute[state.patrolIndex % state.patrolRoute.length];
+  if (transform.tileX === target.x && transform.tileY === target.y) {
+    state.patrolIndex = (state.patrolIndex + 1) % state.patrolRoute.length;
+    state.pauseTimer = state.pauseDuration;
+    return;
+  }
+  if (state.pauseTimer > 0 || state.moveCooldown > 0) {
+    return;
+  }
+  const path = computePath(world, transform.tileX, transform.tileY, target.x, target.y);
+  if (!path || path.length === 0) {
+    state.patrolIndex = (state.patrolIndex + 1) % state.patrolRoute.length;
+    state.pauseTimer = state.pauseDuration;
+    return;
+  }
+  const next = path[0];
+  if (next) {
+    transform.tileX = next.x;
+    transform.tileY = next.y;
+    state.moveCooldown = state.moveInterval;
+  }
+}
+
+function handleMilitiaEngage(
+  world: World,
+  transform: Transform,
+  state: MilitiaState,
+  attackDamage: number,
+  villageTransform: Transform | undefined,
+): void {
+  if (state.behavior.type !== 'engage') {
+    return;
+  }
+  const targetId = state.behavior.targetId;
+  const targetTransform = world.components.transforms.get(targetId);
+  if (!targetTransform || !world.components.monster.has(targetId)) {
+    const path = computeMilitiaReturnPath(world, transform, state, villageTransform);
+    if (path.length === 0) {
+      state.behavior = { type: 'patrol' };
+      state.pauseTimer = state.pauseDuration;
+    } else {
+      state.behavior = { type: 'return', path };
+    }
+    return;
+  }
+
+  const distance =
+    Math.abs(targetTransform.tileX - transform.tileX) +
+    Math.abs(targetTransform.tileY - transform.tileY);
+
+  if (distance <= 1) {
+    if (state.attackCooldown > 0) {
+      return;
+    }
+    const health = world.components.health.get(targetId);
+    if (health) {
+      health.hp = Math.max(0, health.hp - attackDamage);
+      if (health.hp <= 0) {
+        onEntityDefeated(world, targetId);
+        const path = computeMilitiaReturnPath(world, transform, state, villageTransform);
+        if (path.length === 0) {
+          state.behavior = { type: 'patrol' };
+          state.pauseTimer = state.pauseDuration;
+        } else {
+          state.behavior = { type: 'return', path };
+        }
+      }
+    }
+    state.attackCooldown = state.attackInterval;
+    return;
+  }
+
+  if (state.moveCooldown > 0) {
+    return;
+  }
+  const path = computePath(world, transform.tileX, transform.tileY, targetTransform.tileX, targetTransform.tileY);
+  if (!path || path.length === 0) {
+    const returnPath = computeMilitiaReturnPath(world, transform, state, villageTransform);
+    if (returnPath.length === 0) {
+      state.behavior = { type: 'patrol' };
+      state.pauseTimer = state.pauseDuration;
+    } else {
+      state.behavior = { type: 'return', path: returnPath };
+    }
+    return;
+  }
+  const next = path[0];
+  if (next) {
+    transform.tileX = next.x;
+    transform.tileY = next.y;
+    state.moveCooldown = state.moveInterval;
+  }
+}
+
+function handleMilitiaReturn(world: World, transform: Transform, state: MilitiaState): void {
+  if (state.behavior.type !== 'return') {
+    return;
+  }
+  if (state.behavior.path.length === 0) {
+    state.behavior = { type: 'patrol' };
+    state.pauseTimer = state.pauseDuration;
+    return;
+  }
+  if (state.moveCooldown > 0) {
+    return;
+  }
+  const next = state.behavior.path.shift();
+  if (!next) {
+    state.behavior = { type: 'patrol' };
+    state.pauseTimer = state.pauseDuration;
+    return;
+  }
+  transform.tileX = next.x;
+  transform.tileY = next.y;
+  state.moveCooldown = state.moveInterval;
+  if (state.behavior.path.length === 0) {
+    state.behavior = { type: 'patrol' };
+    state.pauseTimer = state.pauseDuration;
+  }
+}
+
+function computeMilitiaReturnPath(
+  world: World,
+  transform: Transform,
+  state: MilitiaState,
+  villageTransform: Transform | undefined,
+): TilePosition[] {
+  if (state.patrolRoute.length > 0) {
+    const target = state.patrolRoute[state.patrolIndex % state.patrolRoute.length];
+    const path = computePath(world, transform.tileX, transform.tileY, target.x, target.y);
+    if (path && path.length > 0) {
+      return [...path];
+    }
+  }
+  if (villageTransform) {
+    const fallback = computePath(
+      world,
+      transform.tileX,
+      transform.tileY,
+      villageTransform.tileX,
+      villageTransform.tileY,
+    );
+    if (fallback && fallback.length > 0) {
+      return [...fallback];
+    }
+  }
+  return [];
+}
+
+function findMonsterOnVillageTile(world: World, villageId: Entity): Entity | null {
+  const villageTransform = world.components.transforms.get(villageId);
+  if (!villageTransform) {
+    return null;
+  }
+  for (const [monsterId] of world.components.monster.entries()) {
+    const transform = world.components.transforms.get(monsterId);
+    if (!transform) {
+      continue;
+    }
+    const tile = getTile(world.grid, transform.tileX, transform.tileY);
+    if (tile?.type !== 'town') {
+      continue;
+    }
+    const townAtTile = findTownAt(world, transform.tileX, transform.tileY);
+    if (townAtTile === villageId) {
+      return monsterId;
+    }
+  }
+  return null;
 }
 
 function findNearestResource(world: World, startX: number, startY: number): ResourceSearchResult | null {
@@ -1136,23 +1554,6 @@ function computePath(world: World, startX: number, startY: number, goalX: number
   }
 
   return path.slice(1).map((point) => ({ x: point.x, y: point.y }));
-}
-
-function hasNearbyThreat(world: World, x: number, y: number, radius: number): boolean {
-  if (radius <= 0) {
-    return false;
-  }
-  for (const [monsterEntity] of world.components.monster.entries()) {
-    const transform = world.components.transforms.get(monsterEntity);
-    if (!transform) {
-      continue;
-    }
-    const dist = Math.abs(transform.tileX - x) + Math.abs(transform.tileY - y);
-    if (dist <= radius) {
-      return true;
-    }
-  }
-  return false;
 }
 
 function neighborTiles(grid: World['grid'], x: number, y: number): TilePosition[] {
