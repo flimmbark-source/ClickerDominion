@@ -1,9 +1,10 @@
-import type { BalanceConfig, MonsterKind } from '../logic/balance';
+import type { BalanceConfig, MonsterKind, ResourceType } from '../logic/balance';
 import { createIntentState, type IntentState, type AbilityIntent, type ClickIntent } from '../logic/intents';
 import type { RenderSnapshot } from '../render/state';
 import { RNG } from '../utils/rng';
 import { EntityManager } from '../logic/simulation/EntityManager';
 import { Village, Villager } from '../logic/simulation/entities';
+import { ResourceTile, type ResourceTileState } from '../logic/simulation/ResourceTile';
 import {
   type ComponentStores,
   type Entity,
@@ -28,9 +29,11 @@ export interface TileState {
   corrupted: boolean;
   corruptProgress: number;
   corrupting: boolean;
-  resourceType?: string;
+  resourceType?: ResourceType;
   resourceAmount?: number;
   resourceMax?: number;
+  resourceState?: ResourceTileState;
+  resourceNode?: ResourceTile;
 }
 
 export interface GridState {
@@ -294,10 +297,25 @@ function spawnInitialEntities(world: World): void {
     for (const node of balance.resources.nodes) {
       const resourceTile = getTile(world.grid, node.tileX, node.tileY);
       if (!resourceTile) continue;
+      const typeConfig = balance.resources.types[node.type];
+      if (!typeConfig) continue;
+      const gatherDurationTicks = Math.max(
+        1,
+        Math.round(typeConfig.gatherSeconds * balance.ticksPerSecond),
+      );
+      const resourceNode = new ResourceTile({
+        type: node.type,
+        totalAmount: node.amount,
+        gatherDurationTicks,
+        yieldPerGather: typeConfig.yieldPerGather,
+        effects: typeConfig.effects,
+      });
       resourceTile.type = 'resource';
-      resourceTile.resourceType = node.type;
-      resourceTile.resourceAmount = node.amount;
+      resourceTile.resourceType = resourceNode.type;
+      resourceTile.resourceAmount = resourceNode.remainingResource;
       resourceTile.resourceMax = node.amount;
+      resourceTile.resourceState = resourceNode.state;
+      resourceTile.resourceNode = resourceNode;
     }
   }
 }

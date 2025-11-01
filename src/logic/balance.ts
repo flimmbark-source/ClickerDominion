@@ -1,3 +1,17 @@
+export type ResourceType = 'wood' | 'food' | 'ore';
+
+export interface ResourceProductionEffectConfig {
+  stockpilePerUnit: number;
+  spawnIntervalBonusPerUnit: number;
+  spawnCostReductionPerUnit: number;
+}
+
+export interface ResourceTypeConfig {
+  gatherSeconds: number;
+  yieldPerGather: number;
+  effects: ResourceProductionEffectConfig;
+}
+
 export interface BalanceConfig {
   ticksPerSecond: number;
   grid: {
@@ -78,7 +92,8 @@ export interface BalanceConfig {
     fleeRadius: number;
   };
   resources: {
-    nodes: Array<{ tileX: number; tileY: number; type: string; amount: number }>;
+    types: Record<ResourceType, ResourceTypeConfig>;
+    nodes: Array<{ tileX: number; tileY: number; type: ResourceType; amount: number }>;
   };
   corruption: {
     tileMax: number;

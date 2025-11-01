@@ -12,6 +12,7 @@ import { consumeIntents, beginTick } from './intents';
 import { findPath } from './pathfinding';
 import type { DarkEnergyMarkerView } from '../render/state';
 import type { VillageMood, TilePosition } from './simulation/entities';
+import type { ResourceType } from './balance';
 
 export type System = (world: World) => void;
 
@@ -217,13 +218,15 @@ function villagerAiSystem(world: World): void {
           break;
         }
         if (target.path.length === 0) {
-          villager.startGathering(target.target, target.resourceType);
+          villager.startGathering(target.target, target.resourceType, target.gatherTicks);
           break;
         }
-        villager.startTravelToResource(target.path, target.resourceType, target.target);
-        if (villager.state.type === 'travelToResource' && villager.state.path.length === 0) {
-          villager.startGathering(target.target, target.resourceType);
-        }
+        villager.startTravelToResource(
+          target.path,
+          target.resourceType,
+          target.target,
+          target.gatherTicks,
+        );
         break;
       }
 
@@ -236,45 +239,66 @@ function villagerAiSystem(world: World): void {
           }
         }
         if (villager.state.path.length === 0) {
-          const { target, resourceType } = villager.state;
+          const { target, resourceType, gatherTicks } = villager.state;
           if (transform.tileX === target.x && transform.tileY === target.y) {
-            villager.startGathering(target, resourceType);
+            villager.startGathering(target, resourceType, gatherTicks);
           }
         }
         break;
       }
 
       case 'gathering': {
-        if (villager.state.remainingTicks > 0) {
-          villager.state.remainingTicks -= 1;
-        }
-        if (villager.state.remainingTicks > 0) {
-          break;
-        }
-        const target = villager.state.target;
+        const { target, resourceType } = villager.state;
         const tile = getTile(world.grid, target.x, target.y);
-        if (!tile || !tile.resourceType || (tile.resourceAmount ?? 0) <= 0) {
+        const node = tile?.resourceNode;
+        if (!tile || !node || node.isDepleted() || node.type !== resourceType) {
           villager.carriedResource = 0;
           villager.carriedResourceType = null;
           villager.setIdle();
           break;
         }
-        const amountAvailable = tile.resourceAmount ?? 0;
-        const collected = Math.min(villager.carryCapacity, amountAvailable);
+
+        if (villager.state.remainingTicks > 0) {
+          villager.state.remainingTicks -= 1;
+          if (villager.state.remainingTicks < 0) {
+            villager.state.remainingTicks = 0;
+          }
+          const gatherable = villager.carryCapacity - villager.state.collected;
+          if (gatherable > 0) {
+            const gathered = node.gatherTick(gatherable);
+            villager.state.collected = Math.min(
+              villager.carryCapacity,
+              villager.state.collected + gathered,
+            );
+          }
+          tile.resourceAmount = node.remainingResource;
+          tile.resourceState = node.state;
+          tile.resourceType = node.type;
+        }
+
+        tile.resourceAmount = node.remainingResource;
+        tile.resourceState = node.state;
+        tile.resourceType = node.type;
+
+        const nodeDepleted = node.isDepleted();
+        const capacityReached = villager.state.collected >= villager.carryCapacity - 1e-6;
+        const finished =
+          villager.state.remainingTicks <= 0 || nodeDepleted || capacityReached;
+
+        if (!finished) {
+          break;
+        }
+
+        const collected = Math.min(villager.carryCapacity, villager.state.collected);
         if (collected <= 0) {
+          villager.carriedResource = 0;
+          villager.carriedResourceType = null;
           villager.setIdle();
           break;
         }
+
         villager.carriedResource = collected;
-        villager.carriedResourceType = tile.resourceType;
-        tile.resourceAmount = amountAvailable - collected;
-        if ((tile.resourceAmount ?? 0) <= 0) {
-          tile.resourceAmount = 0;
-          tile.resourceType = undefined;
-          if (tile.type === 'resource') {
-            tile.type = 'plain';
-          }
-        }
+        villager.carriedResourceType = resourceType;
         const pathHome = computePath(world, transform.tileX, transform.tileY, homeTransform.tileX, homeTransform.tileY);
         if (!pathHome) {
           villager.carriedResource = 0;
@@ -313,7 +337,17 @@ function villagerAiSystem(world: World): void {
         }
         if (villager.carriedResource > 0) {
           const village = world.components.villages.get(villager.homeVillageId);
-          village?.addResources(villager.carriedResource);
+          const resourceType = villager.carriedResourceType;
+          if (village && resourceType) {
+            const resourceDef = world.balance.resources.types[resourceType];
+            if (resourceDef) {
+              village.deliverResources(villager.carriedResource, resourceDef.effects);
+            } else {
+              village.addResources(villager.carriedResource);
+            }
+          } else if (village) {
+            village.addResources(villager.carriedResource);
+          }
         }
         villager.carriedResource = 0;
         villager.carriedResourceType = null;
@@ -652,7 +686,8 @@ function renderSyncSystem(world: World): void {
 interface ResourceSearchResult {
   target: TilePosition;
   path: TilePosition[];
-  resourceType: string;
+  resourceType: ResourceType;
+  gatherTicks: number;
 }
 
 function findNearestResource(world: World, startX: number, startY: number): ResourceSearchResult | null {
@@ -665,13 +700,15 @@ function findNearestResource(world: World, startX: number, startY: number): Reso
   while (queue.length > 0) {
     const current = queue.shift()!;
     const tile = getTile(world.grid, current.x, current.y);
-    if (tile && tile.resourceType && (tile.resourceAmount ?? 0) > 0) {
+    const node = tile?.resourceNode;
+    if (tile && node && !node.isDepleted()) {
       const targetIdx = gridIndex(world.grid, current.x, current.y);
       const path = reconstructTilePath(parents, targetIdx, startIdx, world.grid);
       return {
         target: { x: current.x, y: current.y },
         path: path.slice(1),
-        resourceType: tile.resourceType,
+        resourceType: node.type,
+        gatherTicks: node.gatherDurationTicks,
       };
     }
 
