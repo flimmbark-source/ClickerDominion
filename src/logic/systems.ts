@@ -362,12 +362,15 @@ function renderSyncSystem(world: World): void {
   for (const entity of world.entities) {
     const transform = world.components.transforms.get(entity);
     if (!transform) continue;
+    const renderIso = world.components.renderIso.get(entity);
+    if (!renderIso) continue;
     if (world.components.hero.has(entity)) {
       const health = world.components.health.get(entity);
       snapshot.entities.push({
         id: entity,
         tileX: transform.tileX,
         tileY: transform.tileY,
+        spriteId: renderIso.spriteId,
         kind: 'hero',
         hp: health?.hp,
         hpMax: health?.max,
@@ -379,6 +382,7 @@ function renderSyncSystem(world: World): void {
         id: entity,
         tileX: transform.tileX,
         tileY: transform.tileY,
+        spriteId: renderIso.spriteId,
         kind: 'monster',
         monsterKind: monster.kind,
         hp: health?.hp,
@@ -390,6 +394,7 @@ function renderSyncSystem(world: World): void {
         id: entity,
         tileX: transform.tileX,
         tileY: transform.tileY,
+        spriteId: renderIso.spriteId,
         kind: 'town',
         integrity: town.integrity,
       });
@@ -398,6 +403,7 @@ function renderSyncSystem(world: World): void {
         id: entity,
         tileX: transform.tileX,
         tileY: transform.tileY,
+        spriteId: renderIso.spriteId,
         kind: 'loot',
       });
     }
