@@ -161,9 +161,25 @@ export class Renderer {
     const sizeH = balance.iso.tileHeight / 2;
     const frame = this.atlas[entity.spriteId];
     if (frame) {
-      const destX = pos.x - frame.anchorX;
-      const destY = pos.y + balance.iso.tileHeight / 2 - frame.anchorY;
-      ctx.drawImage(frame.image, frame.sx, frame.sy, frame.sw, frame.sh, destX, destY, frame.sw, frame.sh);
+      const maxWidth = balance.iso.tileWidth;
+      const scale = Math.min(1, maxWidth / frame.sw);
+      const drawWidth = frame.sw * scale;
+      const drawHeight = frame.sh * scale;
+      const anchorX = frame.anchorX * scale;
+      const anchorY = frame.anchorY * scale;
+      const destX = pos.x - anchorX;
+      const destY = pos.y + balance.iso.tileHeight / 2 - anchorY;
+      ctx.drawImage(
+        frame.image,
+        frame.sx,
+        frame.sy,
+        frame.sw,
+        frame.sh,
+        destX,
+        destY,
+        drawWidth,
+        drawHeight,
+      );
     } else {
       this.drawFallbackEntity(entity, pos.x, pos.y, sizeW, sizeH);
     }
