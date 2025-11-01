@@ -1,3 +1,5 @@
+import type { ResourceProductionEffectConfig, ResourceType } from '../balance';
+
 export type VillageMood = 'normal' | 'boosted' | 'starving';
 
 export interface VillageParameters {
@@ -30,11 +32,13 @@ export class Village {
   private readonly boostThreshold: number;
   private readonly starvationThreshold: number;
   private readonly consumptionPerVillagerPerTick: number;
-  private readonly spawnCost: number;
+  private readonly baseSpawnCost: number;
   private readonly maxStockpile: number;
 
   private spawnTimer: number;
   private mood: VillageMood = 'normal';
+  private spawnIntervalBonus = 0;
+  private spawnCostReduction = 0;
 
   constructor(params: VillageParameters) {
     this.entityId = params.entityId;
@@ -46,7 +50,7 @@ export class Village {
     this.boostThreshold = Math.max(0, params.boostThreshold);
     this.starvationThreshold = Math.max(0, params.starvationThreshold);
     this.consumptionPerVillagerPerTick = Math.max(0, params.consumptionPerVillagerPerTick);
-    this.spawnCost = Math.max(0, params.spawnCost);
+    this.baseSpawnCost = Math.max(0, params.spawnCost);
     this.maxStockpile = Math.max(0, params.maxStockpile);
     this.spawnTimer = this.baseSpawnIntervalTicks;
     this.updateMood();
@@ -70,7 +74,8 @@ export class Village {
       return false;
     }
 
-    if (this.resourceStockpile < this.spawnCost) {
+    const spawnCost = this.currentSpawnCost();
+    if (this.resourceStockpile < spawnCost) {
       return false;
     }
 
@@ -85,7 +90,7 @@ export class Village {
       return false;
     }
 
-    this.resourceStockpile = Math.max(0, this.resourceStockpile - this.spawnCost);
+    this.resourceStockpile = Math.max(0, this.resourceStockpile - spawnCost);
     this.updateMood();
     this.spawnTimer = interval;
     return true;
@@ -96,6 +101,29 @@ export class Village {
       return;
     }
     this.resourceStockpile = Math.min(this.maxStockpile, this.resourceStockpile + amount);
+    this.updateMood();
+  }
+
+  deliverResources(amount: number, effects: ResourceProductionEffectConfig): void {
+    if (amount <= 0) {
+      return;
+    }
+
+    const stockpileGain = amount * Math.max(0, effects.stockpilePerUnit);
+    if (stockpileGain > 0) {
+      this.resourceStockpile = Math.min(this.maxStockpile, this.resourceStockpile + stockpileGain);
+    }
+
+    if (effects.spawnIntervalBonusPerUnit > 0) {
+      const bonus = amount * effects.spawnIntervalBonusPerUnit;
+      this.spawnIntervalBonus = Math.min(0.8, this.spawnIntervalBonus + bonus);
+    }
+
+    if (effects.spawnCostReductionPerUnit > 0) {
+      const reduction = amount * effects.spawnCostReductionPerUnit;
+      this.spawnCostReduction = Math.min(0.8, this.spawnCostReduction + reduction);
+    }
+
     this.updateMood();
   }
 
@@ -130,6 +158,21 @@ export class Village {
   }
 
   private currentSpawnInterval(): number {
+    const moodInterval = this.baseIntervalForMood();
+    const multiplier = Math.max(0.2, 1 - this.spawnIntervalBonus);
+    const modified = Math.max(1, Math.round(moodInterval * multiplier));
+    return modified;
+  }
+
+  private currentSpawnCost(): number {
+    if (this.baseSpawnCost <= 0) {
+      return 0;
+    }
+    const multiplier = Math.max(0.2, 1 - this.spawnCostReduction);
+    return Math.max(1, Math.round(this.baseSpawnCost * multiplier));
+  }
+
+  private baseIntervalForMood(): number {
     if (this.mood === 'boosted' && this.spawnRateBoostMultiplier > 1) {
       const boosted = Math.max(1, Math.floor(this.baseSpawnIntervalTicks / this.spawnRateBoostMultiplier));
       return boosted;
@@ -144,8 +187,21 @@ export class Village {
 
 export type VillagerBehaviorState =
   | { type: 'idle'; idleTicks: number }
-  | { type: 'travelToResource'; path: TilePosition[]; resourceType: string; target: TilePosition }
-  | { type: 'gathering'; remainingTicks: number; target: TilePosition; resourceType: string }
+  | {
+      type: 'travelToResource';
+      path: TilePosition[];
+      resourceType: ResourceType;
+      target: TilePosition;
+      gatherTicks: number;
+    }
+  | {
+      type: 'gathering';
+      remainingTicks: number;
+      target: TilePosition;
+      resourceType: ResourceType;
+      collected: number;
+      gatherTicks: number;
+    }
   | { type: 'returnHome'; path: TilePosition[] }
   | { type: 'depositing'; remainingTicks: number }
   | { type: 'fleeing'; path: TilePosition[] };
@@ -174,7 +230,7 @@ export class Villager {
 
   state: VillagerBehaviorState;
   carriedResource = 0;
-  carriedResourceType: string | null = null;
+  carriedResourceType: ResourceType | null = null;
 
   constructor(params: VillagerParameters) {
     this.entityId = params.entityId;
@@ -190,21 +246,30 @@ export class Villager {
     this.state = { type: 'idle', idleTicks: Math.max(0, delay) };
   }
 
-  startTravelToResource(path: TilePosition[], resourceType: string, target: TilePosition): void {
+  startTravelToResource(
+    path: TilePosition[],
+    resourceType: ResourceType,
+    target: TilePosition,
+    gatherTicks: number,
+  ): void {
     this.state = {
       type: 'travelToResource',
       path: [...path],
       resourceType,
       target,
+      gatherTicks: Math.max(1, gatherTicks),
     };
   }
 
-  startGathering(target: TilePosition, resourceType: string): void {
+  startGathering(target: TilePosition, resourceType: ResourceType, gatherTicks?: number): void {
+    const duration = Math.max(1, gatherTicks ?? this.gatherTicks);
     this.state = {
       type: 'gathering',
-      remainingTicks: this.gatherTicks,
+      remainingTicks: duration,
       target,
       resourceType,
+      collected: 0,
+      gatherTicks: duration,
     };
   }
 

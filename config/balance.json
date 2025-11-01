@@ -82,9 +82,39 @@
     "fleeRadius": 3
   },
   "resources": {
+    "types": {
+      "wood": {
+        "gatherSeconds": 4,
+        "yieldPerGather": 5,
+        "effects": {
+          "stockpilePerUnit": 0.5,
+          "spawnIntervalBonusPerUnit": 0.01,
+          "spawnCostReductionPerUnit": 0
+        }
+      },
+      "food": {
+        "gatherSeconds": 2.5,
+        "yieldPerGather": 6,
+        "effects": {
+          "stockpilePerUnit": 1.2,
+          "spawnIntervalBonusPerUnit": 0,
+          "spawnCostReductionPerUnit": 0
+        }
+      },
+      "ore": {
+        "gatherSeconds": 5,
+        "yieldPerGather": 4,
+        "effects": {
+          "stockpilePerUnit": 0.25,
+          "spawnIntervalBonusPerUnit": 0,
+          "spawnCostReductionPerUnit": 0.02
+        }
+      }
+    },
     "nodes": [
       { "tileX": 3, "tileY": 6, "type": "wood", "amount": 40 },
-      { "tileX": 7, "tileY": 6, "type": "wood", "amount": 40 }
+      { "tileX": 7, "tileY": 6, "type": "ore", "amount": 30 },
+      { "tileX": 2, "tileY": 7, "type": "food", "amount": 45 }
     ]
   },
   "corruption": {

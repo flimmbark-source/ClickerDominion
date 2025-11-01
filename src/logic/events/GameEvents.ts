@@ -31,6 +31,7 @@ export interface GameEventPayloads {
     tick: number;
     deltaMs: number;
   };
+  [key: string]: unknown;
 }
 
 export type GameEventKey = keyof GameEventPayloads;
