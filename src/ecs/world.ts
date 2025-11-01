@@ -2,6 +2,8 @@ import type { BalanceConfig, MonsterKind } from '../logic/balance';
 import { createIntentState, type IntentState, type AbilityIntent, type ClickIntent } from '../logic/intents';
 import type { RenderSnapshot } from '../render/state';
 import { RNG } from '../utils/rng';
+import { EntityManager } from '../logic/simulation/EntityManager';
+import { Village, Villager } from '../logic/simulation/entities';
 import {
   type ComponentStores,
   type Entity,
@@ -18,7 +20,7 @@ import {
   type Corruption,
 } from './components';
 
-export type TileType = 'plain' | 'road' | 'town';
+export type TileType = 'plain' | 'road' | 'town' | 'resource';
 
 export interface TileState {
   type: TileType;
@@ -26,6 +28,9 @@ export interface TileState {
   corrupted: boolean;
   corruptProgress: number;
   corrupting: boolean;
+  resourceType?: string;
+  resourceAmount?: number;
+  resourceMax?: number;
 }
 
 export interface GridState {
@@ -67,6 +72,7 @@ export interface World {
     clicks: ClickIntent[];
     abilities: AbilityIntent[];
   };
+  entityManager: EntityManager;
 }
 
 export function createGrid(width: number, height: number): GridState {
@@ -101,6 +107,10 @@ function baseRenderSnapshot(): RenderSnapshot {
       gold: 0,
       warn30: false,
       warn10: false,
+      villagerCount: 0,
+      villagerCapacity: 0,
+      resourceStockpile: 0,
+      villageMood: 'normal',
     },
   };
 }
@@ -108,6 +118,7 @@ function baseRenderSnapshot(): RenderSnapshot {
 export function createWorld(balance: BalanceConfig): World {
   const grid = createGrid(balance.grid.width, balance.grid.height);
   const components = createComponentStores();
+  const entityManager = new EntityManager();
   const world: World = {
     nextEntityId: 1,
     entities: new Set(),
@@ -122,6 +133,7 @@ export function createWorld(balance: BalanceConfig): World {
     lastSelectedEntity: null,
     floatingNumbers: [],
     currentIntents: { clicks: [], abilities: [] },
+    entityManager,
   };
 
   spawnInitialEntities(world);
@@ -136,6 +148,7 @@ export function createEntity(world: World): Entity {
 
 export function removeEntity(world: World, entity: Entity): void {
   world.entities.delete(entity);
+  world.entityManager.removeEntity(entity);
   const { components } = world;
   components.transforms.delete(entity);
   components.renderIso.delete(entity);
@@ -153,6 +166,8 @@ export function removeEntity(world: World, entity: Entity): void {
   components.darkEnergy.delete(entity);
   components.spawnPoint.delete(entity);
   components.loot.delete(entity);
+  components.villages.delete(entity);
+  components.villagers.delete(entity);
 }
 
 function addTransform(world: World, entity: Entity, data: Transform): void {
@@ -217,6 +232,26 @@ function spawnInitialEntities(world: World): void {
   addTown(world, town, { integrity: balance.town.integrityMax });
   world.components.clickable.add(town);
 
+  const spawnIntervalTicks = Math.max(
+    1,
+    Math.round(balance.villages.baseSpawnIntervalSeconds * balance.ticksPerSecond),
+  );
+  const villageComponent = new Village({
+    entityId: town,
+    capacity: balance.villages.initial.capacity,
+    initialPopulation: balance.villages.initial.population,
+    initialStockpile: balance.villages.initial.stockpile,
+    baseSpawnIntervalTicks: spawnIntervalTicks,
+    spawnRateBoostMultiplier: balance.villages.spawnRateBoostMultiplier,
+    boostThreshold: balance.villages.stockpileBoostThreshold,
+    starvationThreshold: balance.villages.starvationThreshold,
+    consumptionPerVillagerPerTick: balance.villages.consumptionPerVillagerPerTick,
+    spawnCost: balance.villages.spawnCost,
+    maxStockpile: balance.villages.maxStockpile,
+  });
+  world.components.villages.set(town, villageComponent);
+  world.entityManager.registerVillage(town, villageComponent);
+
   // Hero entity
   const hero = createEntity(world);
   addTransform(world, hero, { tileX: heroSpawn.tileX, tileY: heroSpawn.tileY });
@@ -254,6 +289,54 @@ function spawnInitialEntities(world: World): void {
     tile.corruptProgress = 1;
     tile.corrupting = false;
   }
+
+  if (balance.resources?.nodes) {
+    for (const node of balance.resources.nodes) {
+      const resourceTile = getTile(world.grid, node.tileX, node.tileY);
+      if (!resourceTile) continue;
+      resourceTile.type = 'resource';
+      resourceTile.resourceType = node.type;
+      resourceTile.resourceAmount = node.amount;
+      resourceTile.resourceMax = node.amount;
+    }
+  }
+}
+
+export function spawnVillager(world: World, villageEntity: Entity): Entity | null {
+  const villageTransform = world.components.transforms.get(villageEntity);
+  if (!villageTransform) {
+    return null;
+  }
+
+  const entity = createEntity(world);
+  addTransform(world, entity, { tileX: villageTransform.tileX, tileY: villageTransform.tileY });
+  addRenderIso(world, entity, { spriteId: 'villager' });
+
+  const gatherTicks = Math.max(
+    1,
+    Math.round(world.balance.villagers.gatherSeconds * world.balance.ticksPerSecond),
+  );
+  const depositTicks = Math.max(
+    1,
+    Math.round(world.balance.villagers.depositSeconds * world.balance.ticksPerSecond),
+  );
+  const idleTicks = Math.max(
+    0,
+    Math.round(world.balance.villagers.idleSecondsBetweenJobs * world.balance.ticksPerSecond),
+  );
+
+  const villager = new Villager({
+    entityId: entity,
+    homeVillageId: villageEntity,
+    gatherTicks,
+    depositTicks,
+    carryCapacity: world.balance.villagers.carryCapacity,
+    idleTicksBetweenJobs: idleTicks,
+  });
+
+  world.components.villagers.set(entity, villager);
+  world.entityManager.registerVillager(entity, villageEntity);
+  return entity;
 }
 
 export function spawnMonster(world: World, tileX: number, tileY: number, kind: MonsterKind): Entity {

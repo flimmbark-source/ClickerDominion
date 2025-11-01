@@ -1,5 +1,6 @@
 import type { MonsterKind } from '../logic/balance';
 import type { SpriteId } from '../render/sprites';
+import { Village, Villager } from '../logic/simulation/entities';
 
 export type Entity = number;
 
@@ -101,6 +102,8 @@ export type ComponentStores = {
   darkEnergy: Map<Entity, DarkEnergy>;
   spawnPoint: Map<Entity, SpawnPoint>;
   loot: Map<Entity, Loot>;
+  villages: Map<Entity, Village>;
+  villagers: Map<Entity, Villager>;
 };
 
 export function createComponentStores(): ComponentStores {
@@ -121,5 +124,7 @@ export function createComponentStores(): ComponentStores {
     darkEnergy: new Map(),
     spawnPoint: new Map(),
     loot: new Map(),
+    villages: new Map(),
+    villagers: new Map(),
   };
 }
