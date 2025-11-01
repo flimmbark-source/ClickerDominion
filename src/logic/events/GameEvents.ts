@@ -35,3 +35,10 @@ export interface GameEventPayloads {
 }
 
 export type GameEventKey = keyof GameEventPayloads;
+
+export type GameEventMessage = {
+  [EventType in GameEvent]: {
+    type: EventType;
+    payload: GameEventPayloads[EventType];
+  };
+}[GameEvent];

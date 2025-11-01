@@ -1,6 +1,6 @@
 import type { MonsterKind } from '../logic/balance';
 import type { SpriteId } from '../render/sprites';
-import { Village, Villager } from '../logic/simulation/entities';
+import { Village, Villager, type TilePosition } from '../logic/simulation/entities';
 
 export type Entity = number;
 
@@ -76,9 +76,17 @@ export interface Loot {
   amount: number;
 }
 
+export type MonsterBehaviorState =
+  | { type: 'roam'; remainingTicks: number }
+  | { type: 'chaseVillager'; targetId: Entity }
+  | { type: 'attackVillager'; targetId: Entity }
+  | { type: 'wanderTowardVillage'; target: TilePosition | null };
+
 export interface MonsterState {
   moveCooldown: number;
   attackCooldown: number;
+  scanCooldown: number;
+  behavior: MonsterBehaviorState;
 }
 
 export interface HeroState {

@@ -1,5 +1,6 @@
 import type { BalanceConfig, MonsterKind, ResourceType } from '../logic/balance';
 import { createIntentState, type IntentState, type AbilityIntent, type ClickIntent } from '../logic/intents';
+import type { GameEventMessage } from '../logic/events/GameEvents';
 import type { RenderSnapshot } from '../render/state';
 import { RNG } from '../utils/rng';
 import { EntityManager } from '../logic/simulation/EntityManager';
@@ -55,6 +56,13 @@ export interface FloatingNumber {
   crit: boolean;
 }
 
+export interface MonsterSpawnerState {
+  timer: number;
+  baseIntervalTicks: number;
+  minIntervalTicks: number;
+  wavesSpawned: number;
+}
+
 export interface World {
   nextEntityId: number;
   entities: Set<Entity>;
@@ -71,11 +79,13 @@ export interface World {
   economy: EconomyState;
   lastSelectedEntity: Entity | null;
   floatingNumbers: FloatingNumber[];
+  events: GameEventMessage[];
   currentIntents: {
     clicks: ClickIntent[];
     abilities: AbilityIntent[];
   };
   entityManager: EntityManager;
+  monsterSpawner: MonsterSpawnerState;
 }
 
 export function createGrid(width: number, height: number): GridState {
@@ -122,6 +132,8 @@ export function createWorld(balance: BalanceConfig): World {
   const grid = createGrid(balance.grid.width, balance.grid.height);
   const components = createComponentStores();
   const entityManager = new EntityManager();
+  const baseSpawnIntervalTicks = Math.max(1, Math.round(balance.ticksPerSecond * 6));
+  const minSpawnIntervalTicks = Math.max(1, Math.round(balance.ticksPerSecond * 1.5));
   const world: World = {
     nextEntityId: 1,
     entities: new Set(),
@@ -135,8 +147,15 @@ export function createWorld(balance: BalanceConfig): World {
     economy: { gold: 0, shards: 0 },
     lastSelectedEntity: null,
     floatingNumbers: [],
+    events: [],
     currentIntents: { clicks: [], abilities: [] },
     entityManager,
+    monsterSpawner: {
+      timer: baseSpawnIntervalTicks,
+      baseIntervalTicks: baseSpawnIntervalTicks,
+      minIntervalTicks: minSpawnIntervalTicks,
+      wavesSpawned: 0,
+    },
   };
 
   spawnInitialEntities(world);
@@ -366,11 +385,12 @@ export function spawnMonster(world: World, tileX: number, tileY: number, kind: M
     hp: balance.monsters.kinds[kind].hp,
     max: balance.monsters.kinds[kind].hp,
   });
+  const roamDuration = Math.max(1, Math.round(world.rng.range(0.5, 1.5) * balance.ticksPerSecond));
   addMonster(world, entity, { kind }, {
-    moveCooldown: Math.round(
-      (balance.monsters.base.stepIntervalMs / 1000) * balance.ticksPerSecond / balance.monsters.kinds[kind].speedMul,
-    ),
-    attackCooldown: Math.round((balance.monsters.base.attack.cooldownMs / 1000) * balance.ticksPerSecond),
+    moveCooldown: 0,
+    attackCooldown: 0,
+    scanCooldown: 0,
+    behavior: { type: 'roam', remainingTicks: roamDuration },
   });
   world.components.clickable.add(entity);
   return entity;
