@@ -3,6 +3,7 @@ import { loadBalance } from './logic/balance';
 import { createSystemPipeline } from './logic/systems';
 import { queueClick, queueAbility } from './logic/intents';
 import { Renderer } from './render/renderer';
+import { loadSpriteAtlas } from './render/sprites';
 import { Hud } from './ui/hud';
 
 async function bootstrap() {
@@ -11,7 +12,7 @@ async function bootstrap() {
     throw new Error('#app container missing');
   }
 
-  const balance = await loadBalance();
+  const [balance, atlas] = await Promise.all([loadBalance(), loadSpriteAtlas()]);
   const world = createWorld(balance);
   const systems = createSystemPipeline();
 
@@ -25,7 +26,7 @@ async function bootstrap() {
   root.style.position = 'relative';
   root.appendChild(canvas);
 
-  const renderer = new Renderer(canvas, balance);
+  const renderer = new Renderer(canvas, balance, atlas);
   const hud = new Hud(root);
 
   canvas.addEventListener('click', (event) => {

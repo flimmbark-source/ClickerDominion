@@ -1,5 +1,6 @@
 import type { TileType } from '../ecs/world';
 import type { MonsterKind } from '../logic/balance';
+import type { SpriteId } from './sprites';
 
 export interface RenderTile {
   tileX: number;
@@ -13,7 +14,7 @@ export interface RenderEntity {
   id: number;
   tileX: number;
   tileY: number;
-  spriteId: string;
+  spriteId: SpriteId;
   kind: 'hero' | 'monster' | 'town' | 'loot';
   monsterKind?: MonsterKind;
   hp?: number;
