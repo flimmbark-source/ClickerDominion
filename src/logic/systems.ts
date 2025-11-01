@@ -1,4 +1,4 @@
-import type { Entity, Transform } from '../ecs/components';
+import type { Entity, MonsterBehaviorState, MonsterState, Transform } from '../ecs/components';
 import {
   getTile,
   gridIndex,
@@ -9,14 +9,13 @@ import {
   type World,
 } from '../ecs/world';
 import { consumeIntents, beginTick } from './intents';
-import { findPath } from './pathfinding';
+import { findPath, findPathBfs } from './pathfinding';
+import { GameEvent, type GameEventPayloads } from './events/GameEvents';
 import type { DarkEnergyMarkerView } from '../render/state';
 import type { VillageMood, TilePosition } from './simulation/entities';
-import type { ResourceType } from './balance';
+import type { ResourceType, MonsterKind } from './balance';
 
 export type System = (world: World) => void;
-
-type TownTarget = { entity: Entity; transform: Transform };
 
 type DarkActionKey = keyof World['balance']['darkEnergy']['actions'];
 
@@ -40,6 +39,7 @@ export function createSystemPipeline(): System[] {
 
 function timeSystem(world: World): void {
   beginTick(world.intents);
+  world.events.length = 0;
   world.time.tick += 1;
   world.time.seconds = world.time.tick / world.balance.ticksPerSecond;
 
@@ -381,22 +381,25 @@ function villagerAiSystem(world: World): void {
 }
 
 function monsterAiSystem(world: World): void {
-  const balance = world.balance;
-  const townTargets: TownTarget[] = Array.from(world.components.town.keys())
-    .map((entity) => {
-      const transform = world.components.transforms.get(entity);
-      return transform ? { entity, transform } : null;
-    })
-    .filter((value): value is TownTarget => value !== null);
-  if (townTargets.length === 0) {
+  if (world.components.monster.size === 0) {
     return;
   }
 
+  const balance = world.balance;
   const occupied = new Set<number>();
-  for (const [entity, transform] of world.components.transforms.entries()) {
+  for (const [, transform] of world.components.transforms.entries()) {
     occupied.add(gridIndex(world.grid, transform.tileX, transform.tileY));
   }
 
+  const villagerTransforms = new Map<Entity, Transform>();
+  for (const [entity] of world.components.villagers.entries()) {
+    const transform = world.components.transforms.get(entity);
+    if (transform) {
+      villagerTransforms.set(entity, transform);
+    }
+  }
+
+  const villageEdgeTargets = gatherVillageEdgeTargets(world);
   const corruptingTiles = new Set<number>();
 
   for (const [entity, monster] of world.components.monster.entries()) {
@@ -405,39 +408,160 @@ function monsterAiSystem(world: World): void {
     if (!state || !transform) {
       continue;
     }
-    if (state.moveCooldown > 0) {
-      state.moveCooldown -= 1;
-      continue;
-    }
-    const target = findNearestTownTarget(townTargets, transform.tileX, transform.tileY);
-    if (!target) {
-      continue;
-    }
-    const goal = target.transform;
-    const path = findPath(
-      world.grid,
-      { x: transform.tileX, y: transform.tileY },
-      { x: goal.tileX, y: goal.tileY },
-      (x, y) => {
-        const idx = gridIndex(world.grid, x, y);
-        if (idx === gridIndex(world.grid, goal.tileX, goal.tileY)) {
-          return true;
-        }
-        return !occupied.has(idx);
-      },
+
+    const moveDelay = Math.max(
+      1,
+      Math.round(
+        (balance.monsters.base.stepIntervalMs / 1000) *
+          balance.ticksPerSecond /
+          balance.monsters.kinds[monster.kind].speedMul,
+      ),
     );
-    if (path.length >= 2) {
-      const next = path[1];
-      occupied.delete(gridIndex(world.grid, transform.tileX, transform.tileY));
-      transform.tileX = next.x;
-      transform.tileY = next.y;
-      occupied.add(gridIndex(world.grid, transform.tileX, transform.tileY));
-      handleTownContact(world, transform.tileX, transform.tileY, corruptingTiles);
-    } else if (path.length === 1) {
-      handleTownContact(world, transform.tileX, transform.tileY, corruptingTiles);
-    }
-    state.moveCooldown = Math.max(1, Math.round((balance.monsters.base.stepIntervalMs / 1000) * balance.ticksPerSecond / balance.monsters.kinds[monster.kind].speedMul));
+    const attackDelay = Math.max(
+      1,
+      Math.round((balance.monsters.base.attack.cooldownMs / 1000) * balance.ticksPerSecond),
+    );
+
+    state.moveCooldown = Math.max(0, state.moveCooldown - 1);
     state.attackCooldown = Math.max(0, state.attackCooldown - 1);
+    state.scanCooldown = Math.max(0, state.scanCooldown - 1);
+
+    if (!state.behavior) {
+      state.behavior = createMonsterRoamState(world);
+    }
+
+    if (handleAttackState(world, entity, state, transform, attackDelay, occupied, villagerTransforms)) {
+      state.moveCooldown = moveDelay;
+      handleTownContact(world, transform.tileX, transform.tileY, corruptingTiles);
+      continue;
+    }
+
+    if (state.scanCooldown === 0) {
+      const radius = Math.max(3, Math.min(5, Math.floor(world.rng.range(3, 6))));
+      const villagerTarget = findNearestVillagerWithinRadius(
+        transform.tileX,
+        transform.tileY,
+        radius,
+        villagerTransforms,
+      );
+      if (villagerTarget !== null) {
+        state.behavior = { type: 'chaseVillager', targetId: villagerTarget };
+      } else {
+        state.behavior = createWanderTowardVillageState(
+          world,
+          transform.tileX,
+          transform.tileY,
+          villageEdgeTargets,
+          occupied,
+        );
+      }
+      state.scanCooldown = Math.max(1, Math.round(balance.ticksPerSecond * 0.5));
+    }
+
+    if (state.moveCooldown > 0) {
+      handleTownContact(world, transform.tileX, transform.tileY, corruptingTiles);
+      continue;
+    }
+
+    switch (state.behavior.type) {
+      case 'roam': {
+        const moved = performMonsterRoam(world, transform, occupied);
+        const remaining = Math.max(0, state.behavior.remainingTicks - 1);
+        if (!moved) {
+          state.behavior = createWanderTowardVillageState(
+            world,
+            transform.tileX,
+            transform.tileY,
+            villageEdgeTargets,
+            occupied,
+          );
+        } else if (remaining > 0) {
+          state.behavior = { type: 'roam', remainingTicks: remaining };
+        } else {
+          state.behavior = createWanderTowardVillageState(
+            world,
+            transform.tileX,
+            transform.tileY,
+            villageEdgeTargets,
+            occupied,
+          );
+        }
+        state.moveCooldown = moveDelay;
+        break;
+      }
+      case 'chaseVillager': {
+        const villagerTransform = villagerTransforms.get(state.behavior.targetId);
+        if (!villagerTransform) {
+          state.behavior = createMonsterRoamState(world);
+          state.scanCooldown = 0;
+          state.moveCooldown = moveDelay;
+          break;
+        }
+        const distance =
+          Math.abs(villagerTransform.tileX - transform.tileX) +
+          Math.abs(villagerTransform.tileY - transform.tileY);
+        if (distance <= 1) {
+          state.behavior = { type: 'attackVillager', targetId: state.behavior.targetId };
+          handleAttackState(world, entity, state, transform, attackDelay, occupied, villagerTransforms);
+          state.moveCooldown = moveDelay;
+          break;
+        }
+        const path = findPathBfs(
+          world.grid,
+          { x: transform.tileX, y: transform.tileY },
+          { x: villagerTransform.tileX, y: villagerTransform.tileY },
+          (x, y) => canMonsterStep(world, occupied, x, y, transform.tileX, transform.tileY),
+        );
+        if (path.length <= 1) {
+          state.behavior = createMonsterRoamState(world);
+          state.scanCooldown = 0;
+          state.moveCooldown = moveDelay;
+          break;
+        }
+        const next = path[1];
+        if (next.x === villagerTransform.tileX && next.y === villagerTransform.tileY) {
+          state.behavior = { type: 'attackVillager', targetId: state.behavior.targetId };
+          handleAttackState(world, entity, state, transform, attackDelay, occupied, villagerTransforms);
+          state.moveCooldown = moveDelay;
+          break;
+        }
+        moveMonster(world, transform, next, occupied);
+        state.moveCooldown = moveDelay;
+        break;
+      }
+      case 'wanderTowardVillage': {
+        if (!state.behavior.target) {
+          state.behavior = createMonsterRoamState(world);
+          state.moveCooldown = moveDelay;
+          break;
+        }
+        const path = findPathBfs(
+          world.grid,
+          { x: transform.tileX, y: transform.tileY },
+          state.behavior.target,
+          (x, y) => canMonsterStep(world, occupied, x, y, transform.tileX, transform.tileY),
+        );
+        if (path.length <= 1) {
+          state.moveCooldown = moveDelay;
+          break;
+        }
+        const next = path[1];
+        moveMonster(world, transform, next, occupied);
+        state.moveCooldown = moveDelay;
+        break;
+      }
+      case 'attackVillager': {
+        handleAttackState(world, entity, state, transform, attackDelay, occupied, villagerTransforms);
+        state.moveCooldown = moveDelay;
+        break;
+      }
+      default: {
+        const exhaustive: never = state.behavior;
+        throw new Error(`Unhandled monster behavior state ${(exhaustive as { type: string }).type}`);
+      }
+    }
+
+    handleTownContact(world, transform.tileX, transform.tileY, corruptingTiles);
   }
 
   for (let i = 0; i < world.grid.tiles.length; i += 1) {
@@ -448,34 +572,225 @@ function monsterAiSystem(world: World): void {
   }
 }
 
-function findNearestTownTarget(targets: TownTarget[], fromX: number, fromY: number): TownTarget | undefined {
-  let best: TownTarget | undefined;
-  let bestDist = Infinity;
-  for (const target of targets) {
-    const dist = Math.abs(target.transform.tileX - fromX) + Math.abs(target.transform.tileY - fromY);
-    if (dist < bestDist || (dist === bestDist && target.entity < (best?.entity ?? Infinity))) {
-      best = target;
-      bestDist = dist;
+function createMonsterRoamState(world: World): MonsterBehaviorState {
+  const duration = Math.max(1, Math.round(world.rng.range(0.5, 1.5) * world.balance.ticksPerSecond));
+  return { type: 'roam', remainingTicks: duration };
+}
+
+function performMonsterRoam(world: World, transform: Transform, occupied: Set<number>): boolean {
+  const options = neighborTiles(world.grid, transform.tileX, transform.tileY).filter((pos) =>
+    canMonsterStep(world, occupied, pos.x, pos.y, transform.tileX, transform.tileY),
+  );
+  if (options.length === 0) {
+    return false;
+  }
+  const choice = options[Math.floor(world.rng.range(0, options.length))];
+  moveMonster(world, transform, choice, occupied);
+  return true;
+}
+
+function gatherVillageEdgeTargets(world: World): TilePosition[] {
+  const targets: TilePosition[] = [];
+  const seen = new Set<number>();
+  for (const [entity] of world.components.town.entries()) {
+    const transform = world.components.transforms.get(entity);
+    if (!transform) {
+      continue;
+    }
+    for (const neighbor of neighborTiles(world.grid, transform.tileX, transform.tileY)) {
+      const idx = gridIndex(world.grid, neighbor.x, neighbor.y);
+      if (seen.has(idx)) {
+        continue;
+      }
+      seen.add(idx);
+      targets.push(neighbor);
     }
   }
-  return best;
+  return targets;
+}
+
+function createWanderTowardVillageState(
+  world: World,
+  startX: number,
+  startY: number,
+  targets: TilePosition[],
+  occupied: Set<number>,
+): MonsterBehaviorState {
+  if (targets.length === 0) {
+    return createMonsterRoamState(world);
+  }
+  let bestTarget: TilePosition | null = null;
+  let bestLength = Infinity;
+  for (const target of targets) {
+    const path = findPathBfs(
+      world.grid,
+      { x: startX, y: startY },
+      target,
+      (x, y) => canMonsterStep(world, occupied, x, y, startX, startY),
+    );
+    if (path.length === 0) {
+      continue;
+    }
+    if (path.length < bestLength) {
+      bestLength = path.length;
+      bestTarget = target;
+    }
+  }
+  if (!bestTarget) {
+    return createMonsterRoamState(world);
+  }
+  return { type: 'wanderTowardVillage', target: bestTarget };
+}
+
+function findNearestVillagerWithinRadius(
+  fromX: number,
+  fromY: number,
+  radius: number,
+  villagers: Map<Entity, Transform>,
+): Entity | null {
+  let bestId: Entity | null = null;
+  let bestDist = radius + 1;
+  for (const [entity, transform] of villagers.entries()) {
+    const dist = Math.abs(transform.tileX - fromX) + Math.abs(transform.tileY - fromY);
+    if (dist > radius) {
+      continue;
+    }
+    if (dist < bestDist || (dist === bestDist && (bestId === null || entity < bestId))) {
+      bestDist = dist;
+      bestId = entity;
+    }
+  }
+  return bestId;
+}
+
+function handleAttackState(
+  world: World,
+  monsterId: Entity,
+  state: MonsterState,
+  monsterTransform: Transform,
+  attackDelay: number,
+  occupied: Set<number>,
+  villagerTransforms: Map<Entity, Transform>,
+): boolean {
+  if (state.behavior.type !== 'attackVillager') {
+    return false;
+  }
+  if (state.attackCooldown > 0) {
+    return true;
+  }
+  const killedPosition = killVillagerEntity(
+    world,
+    state.behavior.targetId,
+    monsterId,
+    occupied,
+    villagerTransforms,
+  );
+  if (killedPosition) {
+    moveMonster(world, monsterTransform, killedPosition, occupied);
+  }
+  state.attackCooldown = attackDelay;
+  state.behavior = createMonsterRoamState(world);
+  state.scanCooldown = 0;
+  return true;
+}
+
+function killVillagerEntity(
+  world: World,
+  villagerId: Entity,
+  killerId: Entity,
+  occupied: Set<number>,
+  villagerTransforms: Map<Entity, Transform>,
+): TilePosition | null {
+  const transform = world.components.transforms.get(villagerId);
+  if (!transform) {
+    villagerTransforms.delete(villagerId);
+    return null;
+  }
+  const villageId = world.entityManager.getHomeVillage(villagerId);
+  const tileIndex = gridIndex(world.grid, transform.tileX, transform.tileY);
+  occupied.delete(tileIndex);
+  villagerTransforms.delete(villagerId);
+  emitGameEvent(world, GameEvent.VillagerKilled, {
+    villagerId,
+    villageId,
+    killerId,
+  });
+  const position: TilePosition = { x: transform.tileX, y: transform.tileY };
+  removeEntity(world, villagerId);
+  return position;
+}
+
+function moveMonster(world: World, transform: Transform, next: TilePosition, occupied: Set<number>): void {
+  const currentIdx = gridIndex(world.grid, transform.tileX, transform.tileY);
+  occupied.delete(currentIdx);
+  transform.tileX = next.x;
+  transform.tileY = next.y;
+  occupied.add(gridIndex(world.grid, transform.tileX, transform.tileY));
+}
+
+function canMonsterStep(
+  world: World,
+  occupied: Set<number>,
+  x: number,
+  y: number,
+  startX: number,
+  startY: number,
+): boolean {
+  if (x < 0 || y < 0 || x >= world.grid.width || y >= world.grid.height) {
+    return false;
+  }
+  const tile = getTile(world.grid, x, y);
+  if (!tile) {
+    return false;
+  }
+  if (x === startX && y === startY) {
+    return true;
+  }
+  const idx = gridIndex(world.grid, x, y);
+  return !occupied.has(idx);
+}
+
+function emitGameEvent<K extends GameEvent>(
+  world: World,
+  type: K,
+  payload: GameEventPayloads[K],
+): void {
+  world.events.push({ type, payload });
 }
 
 function handleTownContact(world: World, tileX: number, tileY: number, corruptingTiles: Set<number>): void {
-  const tile = getTile(world.grid, tileX, tileY);
-  if (!tile || tile.type !== 'town') {
-    return;
-  }
-  const townEntity = findTownAt(world, tileX, tileY);
+  let targetX = tileX;
+  let targetY = tileY;
+  let tile = getTile(world.grid, tileX, tileY);
+  let townEntity = tile?.type === 'town' ? findTownAt(world, tileX, tileY) : undefined;
+
   if (!townEntity) {
+    for (const neighbor of neighborTiles(world.grid, tileX, tileY)) {
+      const neighborTile = getTile(world.grid, neighbor.x, neighbor.y);
+      if (neighborTile?.type !== 'town') {
+        continue;
+      }
+      const townAtNeighbor = findTownAt(world, neighbor.x, neighbor.y);
+      if (townAtNeighbor) {
+        targetX = neighbor.x;
+        targetY = neighbor.y;
+        tile = neighborTile;
+        townEntity = townAtNeighbor;
+        break;
+      }
+    }
+  }
+
+  if (!townEntity || !tile || tile.type !== 'town') {
     return;
   }
+
   const town = world.components.town.get(townEntity);
   if (!town) {
     return;
   }
   const balance = world.balance;
-  corruptingTiles.add(gridIndex(world.grid, tileX, tileY));
+  corruptingTiles.add(gridIndex(world.grid, targetX, targetY));
   town.integrity = Math.max(0, town.integrity - balance.monsters.base.attack.damage);
   tile.corruptProgress = Math.min(1, tile.corruptProgress + balance.town.corruptProgressPerTick);
   tile.corruption = Math.max(tile.corruption, tile.corruptProgress);
@@ -545,7 +860,38 @@ function corruptionSystem(world: World): void {
 }
 
 function spawningSystem(world: World): void {
-  // Dark lord actions handle major spawns. This system can ensure spawn points tick down.
+  const spawner = world.monsterSpawner;
+  spawner.timer -= 1;
+
+  if (spawner.timer <= 0) {
+    const occupied = new Set<number>();
+    for (const [, transform] of world.components.transforms.entries()) {
+      occupied.add(gridIndex(world.grid, transform.tileX, transform.tileY));
+    }
+
+    const villagerCount = world.components.villagers.size;
+    const waveBase = 1 + Math.floor(world.time.tick / Math.max(1, world.balance.ticksPerSecond * 60));
+    const populationPressure = Math.max(0, Math.floor(villagerCount / Math.max(1, Math.round(world.balance.villages.initial.capacity / 2))));
+    const spawnCount = Math.max(1, waveBase + populationPressure);
+
+    for (let i = 0; i < spawnCount; i += 1) {
+      const spawnTile = findEdgeSpawnPosition(world, occupied);
+      if (!spawnTile) {
+        break;
+      }
+      const kind = selectSpawnMonsterKind(world, spawner.wavesSpawned, villagerCount);
+      spawnMonster(world, spawnTile.x, spawnTile.y, kind);
+      occupied.add(gridIndex(world.grid, spawnTile.x, spawnTile.y));
+    }
+
+    spawner.wavesSpawned += 1;
+    const difficulty = 1 + spawner.wavesSpawned / 3 + world.time.tick / Math.max(1, world.balance.ticksPerSecond * 90);
+    const pressure = 1 + villagerCount / Math.max(1, world.balance.villages.initial.capacity);
+    const intervalDivisor = Math.max(1, difficulty + pressure / 2);
+    const nextInterval = Math.max(spawner.minIntervalTicks, Math.round(spawner.baseIntervalTicks / intervalDivisor));
+    spawner.timer = nextInterval;
+  }
+
   for (const [entity, spawnPoint] of world.components.spawnPoint.entries()) {
     spawnPoint.timer -= 1;
     if (spawnPoint.timer <= 0) {
@@ -556,6 +902,53 @@ function spawningSystem(world: World): void {
       spawnPoint.timer = spawnPoint.rate;
     }
   }
+}
+
+function findEdgeSpawnPosition(world: World, occupied: Set<number>): TilePosition | null {
+  const candidates: TilePosition[] = [];
+  const width = world.grid.width;
+  const height = world.grid.height;
+  for (let x = 0; x < width; x += 1) {
+    candidates.push({ x, y: 0 });
+    if (height > 1) {
+      candidates.push({ x, y: height - 1 });
+    }
+  }
+  for (let y = 1; y < height - 1; y += 1) {
+    candidates.push({ x: 0, y });
+    if (width > 1) {
+      candidates.push({ x: width - 1, y });
+    }
+  }
+  if (candidates.length === 0) {
+    return null;
+  }
+  shuffleInPlace(candidates, world.rng);
+  for (const candidate of candidates) {
+    if (canMonsterSpawnAt(world, candidate.x, candidate.y, occupied)) {
+      return candidate;
+    }
+  }
+  return null;
+}
+
+function canMonsterSpawnAt(world: World, x: number, y: number, occupied: Set<number>): boolean {
+  const tile = getTile(world.grid, x, y);
+  if (!tile || tile.type === 'town') {
+    return false;
+  }
+  const idx = gridIndex(world.grid, x, y);
+  return !occupied.has(idx);
+}
+
+function selectSpawnMonsterKind(world: World, waveCount: number, villagerCount: number): MonsterKind {
+  if (villagerCount >= 12 && 'brute' in world.balance.monsters.kinds) {
+    return 'brute';
+  }
+  if ((waveCount >= 4 || villagerCount >= 6) && 'wisp' in world.balance.monsters.kinds) {
+    return 'wisp';
+  }
+  return 'imp';
 }
 
 function economySystem(world: World): void {

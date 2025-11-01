@@ -47,6 +47,41 @@ export function findPath(grid: GridState, start: Point, goal: Point, canWalk: Wa
   return [];
 }
 
+export function findPathBfs(grid: GridState, start: Point, goal: Point, canWalk: Walkable): Point[] {
+  const startIdx = indexOf(grid, start.x, start.y);
+  const goalIdx = indexOf(grid, goal.x, goal.y);
+  if (startIdx === goalIdx) {
+    return [start];
+  }
+
+  const queue: number[] = [startIdx];
+  const visited = new Set<number>([startIdx]);
+  const cameFrom = new Map<number, number>();
+
+  while (queue.length > 0) {
+    const currentIdx = queue.shift()!;
+    if (currentIdx === goalIdx) {
+      return reconstructPath(grid, cameFrom, currentIdx);
+    }
+
+    const { x: cx, y: cy } = pointOf(grid, currentIdx);
+    for (const neighbor of neighborPoints(grid, cx, cy)) {
+      const neighborIdx = indexOf(grid, neighbor.x, neighbor.y);
+      if (visited.has(neighborIdx)) {
+        continue;
+      }
+      if (!canWalk(neighbor.x, neighbor.y) && neighborIdx !== goalIdx) {
+        continue;
+      }
+      visited.add(neighborIdx);
+      cameFrom.set(neighborIdx, currentIdx);
+      queue.push(neighborIdx);
+    }
+  }
+
+  return [];
+}
+
 function heuristic(a: Point, b: Point): number {
   return Math.abs(a.x - b.x) + Math.abs(a.y - b.y);
 }
