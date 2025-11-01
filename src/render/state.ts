@@ -1,5 +1,6 @@
 import type { TileType } from '../ecs/world';
 import type { MonsterKind } from '../logic/balance';
+import type { VillageMood } from '../logic/simulation/entities';
 import type { SpriteId } from './sprites';
 
 export interface RenderTile {
@@ -15,7 +16,7 @@ export interface RenderEntity {
   tileX: number;
   tileY: number;
   spriteId: SpriteId;
-  kind: 'hero' | 'monster' | 'town' | 'loot';
+  kind: 'hero' | 'monster' | 'town' | 'loot' | 'villager';
   monsterKind?: MonsterKind;
   hp?: number;
   hpMax?: number;
@@ -49,6 +50,10 @@ export interface HudState {
   gold: number;
   warn30: boolean;
   warn10: boolean;
+  villagerCount: number;
+  villagerCapacity: number;
+  resourceStockpile: number;
+  villageMood: VillageMood;
 }
 
 export interface RenderSnapshot {

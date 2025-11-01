@@ -1,8 +1,17 @@
 import type { Entity, Transform } from '../ecs/components';
-import { getTile, gridIndex, removeEntity, spawnMonster, type FloatingNumber, type World } from '../ecs/world';
+import {
+  getTile,
+  gridIndex,
+  removeEntity,
+  spawnMonster,
+  spawnVillager,
+  type FloatingNumber,
+  type World,
+} from '../ecs/world';
 import { consumeIntents, beginTick } from './intents';
 import { findPath } from './pathfinding';
 import type { DarkEnergyMarkerView } from '../render/state';
+import type { VillageMood, TilePosition } from './simulation/entities';
 
 export type System = (world: World) => void;
 
@@ -17,6 +26,8 @@ export function createSystemPipeline(): System[] {
     inputIntentSystem,
     combatResolutionSystem,
     statusEffectSystem,
+    villageSystem,
+    villagerAiSystem,
     monsterAiSystem,
     darkLordSystem,
     corruptionSystem,
@@ -154,6 +165,185 @@ function statusEffectSystem(world: World): void {
   }
 
   // dark energy base gain per tick handled in darkLordSystem
+}
+
+function villageSystem(world: World): void {
+  for (const [entity, village] of world.components.villages.entries()) {
+    village.tick({
+      spawnVillager: () => spawnVillager(world, entity),
+    });
+  }
+}
+
+function villagerAiSystem(world: World): void {
+  if (world.components.villagers.size === 0) {
+    return;
+  }
+
+  const fleeRadius = Math.max(0, Math.round(world.balance.villagers.fleeRadius));
+
+  for (const [entity, villager] of world.components.villagers.entries()) {
+    const transform = world.components.transforms.get(entity);
+    if (!transform) {
+      continue;
+    }
+
+    const homeTransform = world.components.transforms.get(villager.homeVillageId);
+    if (!homeTransform) {
+      villager.setIdle();
+      continue;
+    }
+
+    if (
+      fleeRadius > 0 &&
+      villager.state.type !== 'fleeing' &&
+      hasNearbyThreat(world, transform.tileX, transform.tileY, fleeRadius)
+    ) {
+      const pathToHome = computePath(world, transform.tileX, transform.tileY, homeTransform.tileX, homeTransform.tileY);
+      if (pathToHome) {
+        villager.startFleeing(pathToHome);
+      }
+    }
+
+    switch (villager.state.type) {
+      case 'idle': {
+        if (villager.state.idleTicks > 0) {
+          villager.state.idleTicks = Math.max(0, villager.state.idleTicks - 1);
+          break;
+        }
+        const target = findNearestResource(world, transform.tileX, transform.tileY);
+        if (!target) {
+          villager.setIdle(villager.idleTicksBetweenJobs);
+          break;
+        }
+        if (target.path.length === 0) {
+          villager.startGathering(target.target, target.resourceType);
+          break;
+        }
+        villager.startTravelToResource(target.path, target.resourceType, target.target);
+        if (villager.state.type === 'travelToResource' && villager.state.path.length === 0) {
+          villager.startGathering(target.target, target.resourceType);
+        }
+        break;
+      }
+
+      case 'travelToResource': {
+        if (villager.state.path.length > 0) {
+          const next = villager.state.path.shift();
+          if (next) {
+            transform.tileX = next.x;
+            transform.tileY = next.y;
+          }
+        }
+        if (villager.state.path.length === 0) {
+          const { target, resourceType } = villager.state;
+          if (transform.tileX === target.x && transform.tileY === target.y) {
+            villager.startGathering(target, resourceType);
+          }
+        }
+        break;
+      }
+
+      case 'gathering': {
+        if (villager.state.remainingTicks > 0) {
+          villager.state.remainingTicks -= 1;
+        }
+        if (villager.state.remainingTicks > 0) {
+          break;
+        }
+        const target = villager.state.target;
+        const tile = getTile(world.grid, target.x, target.y);
+        if (!tile || !tile.resourceType || (tile.resourceAmount ?? 0) <= 0) {
+          villager.carriedResource = 0;
+          villager.carriedResourceType = null;
+          villager.setIdle();
+          break;
+        }
+        const amountAvailable = tile.resourceAmount ?? 0;
+        const collected = Math.min(villager.carryCapacity, amountAvailable);
+        if (collected <= 0) {
+          villager.setIdle();
+          break;
+        }
+        villager.carriedResource = collected;
+        villager.carriedResourceType = tile.resourceType;
+        tile.resourceAmount = amountAvailable - collected;
+        if ((tile.resourceAmount ?? 0) <= 0) {
+          tile.resourceAmount = 0;
+          tile.resourceType = undefined;
+          if (tile.type === 'resource') {
+            tile.type = 'plain';
+          }
+        }
+        const pathHome = computePath(world, transform.tileX, transform.tileY, homeTransform.tileX, homeTransform.tileY);
+        if (!pathHome) {
+          villager.carriedResource = 0;
+          villager.carriedResourceType = null;
+          villager.setIdle();
+          break;
+        }
+        villager.startReturnHome(pathHome);
+        break;
+      }
+
+      case 'returnHome': {
+        if (villager.state.path.length > 0) {
+          const next = villager.state.path.shift();
+          if (next) {
+            transform.tileX = next.x;
+            transform.tileY = next.y;
+          }
+        }
+        if (villager.state.path.length === 0 && transform.tileX === homeTransform.tileX && transform.tileY === homeTransform.tileY) {
+          if (villager.carriedResource > 0) {
+            villager.startDepositing();
+          } else {
+            villager.setIdle();
+          }
+        }
+        break;
+      }
+
+      case 'depositing': {
+        if (villager.state.remainingTicks > 0) {
+          villager.state.remainingTicks -= 1;
+        }
+        if (villager.state.remainingTicks > 0) {
+          break;
+        }
+        if (villager.carriedResource > 0) {
+          const village = world.components.villages.get(villager.homeVillageId);
+          village?.addResources(villager.carriedResource);
+        }
+        villager.carriedResource = 0;
+        villager.carriedResourceType = null;
+        villager.setIdle();
+        break;
+      }
+
+      case 'fleeing': {
+        if (villager.state.path.length > 0) {
+          const next = villager.state.path.shift();
+          if (next) {
+            transform.tileX = next.x;
+            transform.tileY = next.y;
+          }
+        }
+        if (villager.state.path.length === 0) {
+          if (transform.tileX === homeTransform.tileX && transform.tileY === homeTransform.tileY) {
+            if (villager.carriedResource > 0) {
+              villager.startDepositing();
+            } else {
+              villager.setIdle();
+            }
+          } else {
+            villager.setIdle();
+          }
+        }
+        break;
+      }
+    }
+  }
 }
 
 function monsterAiSystem(world: World): void {
@@ -398,6 +588,14 @@ function renderSyncSystem(world: World): void {
         kind: 'town',
         integrity: town.integrity,
       });
+    } else if (world.components.villagers.has(entity)) {
+      snapshot.entities.push({
+        id: entity,
+        tileX: transform.tileX,
+        tileY: transform.tileY,
+        spriteId: renderIso.spriteId,
+        kind: 'villager',
+      });
     } else if (world.components.loot.has(entity)) {
       snapshot.entities.push({
         id: entity,
@@ -422,6 +620,18 @@ function renderSyncSystem(world: World): void {
   const darkValue = dark?.value ?? 0;
   const markers = createDarkEnergyMarkers(world, dark);
   const meterMax = computeDarkEnergyMeterMax(darkValue, markers);
+  let villagerCount = 0;
+  let villagerCapacity = 0;
+  let resourceStockpile = 0;
+  let villageMood: VillageMood = 'normal';
+  const villageIterator = world.components.villages.entries().next();
+  if (!villageIterator.done) {
+    const [, village] = villageIterator.value;
+    villagerCount = village.population;
+    villagerCapacity = village.capacity;
+    resourceStockpile = village.resourceStockpile;
+    villageMood = village.getMood();
+  }
   snapshot.hud = {
     doomClockSeconds: doom?.seconds ?? 0,
     darkEnergy: {
@@ -432,7 +642,133 @@ function renderSyncSystem(world: World): void {
     gold: world.economy.gold,
     warn30: (doom?.seconds ?? 0) <= world.balance.ui.flashThresholds.t30,
     warn10: (doom?.seconds ?? 0) <= world.balance.ui.flashThresholds.t10,
+    villagerCount,
+    villagerCapacity,
+    resourceStockpile,
+    villageMood,
   };
+}
+
+interface ResourceSearchResult {
+  target: TilePosition;
+  path: TilePosition[];
+  resourceType: string;
+}
+
+function findNearestResource(world: World, startX: number, startY: number): ResourceSearchResult | null {
+  const queue: TilePosition[] = [{ x: startX, y: startY }];
+  const visited = new Set<number>();
+  const parents = new Map<number, number>();
+  const startIdx = gridIndex(world.grid, startX, startY);
+  visited.add(startIdx);
+
+  while (queue.length > 0) {
+    const current = queue.shift()!;
+    const tile = getTile(world.grid, current.x, current.y);
+    if (tile && tile.resourceType && (tile.resourceAmount ?? 0) > 0) {
+      const targetIdx = gridIndex(world.grid, current.x, current.y);
+      const path = reconstructTilePath(parents, targetIdx, startIdx, world.grid);
+      return {
+        target: { x: current.x, y: current.y },
+        path: path.slice(1),
+        resourceType: tile.resourceType,
+      };
+    }
+
+    for (const neighbor of neighborTiles(world.grid, current.x, current.y)) {
+      const idx = gridIndex(world.grid, neighbor.x, neighbor.y);
+      if (visited.has(idx)) {
+        continue;
+      }
+      visited.add(idx);
+      parents.set(idx, gridIndex(world.grid, current.x, current.y));
+      queue.push(neighbor);
+    }
+  }
+
+  return null;
+}
+
+function computePath(world: World, startX: number, startY: number, goalX: number, goalY: number): TilePosition[] | null {
+  if (startX === goalX && startY === goalY) {
+    return [];
+  }
+
+  const path = findPath(
+    world.grid,
+    { x: startX, y: startY },
+    { x: goalX, y: goalY },
+    (x, y) => x >= 0 && y >= 0 && x < world.grid.width && y < world.grid.height,
+  );
+
+  if (path.length === 0) {
+    return null;
+  }
+
+  return path.slice(1).map((point) => ({ x: point.x, y: point.y }));
+}
+
+function hasNearbyThreat(world: World, x: number, y: number, radius: number): boolean {
+  if (radius <= 0) {
+    return false;
+  }
+  for (const [monsterEntity] of world.components.monster.entries()) {
+    const transform = world.components.transforms.get(monsterEntity);
+    if (!transform) {
+      continue;
+    }
+    const dist = Math.abs(transform.tileX - x) + Math.abs(transform.tileY - y);
+    if (dist <= radius) {
+      return true;
+    }
+  }
+  return false;
+}
+
+function neighborTiles(grid: World['grid'], x: number, y: number): TilePosition[] {
+  const neighbors: TilePosition[] = [];
+  const deltas = [
+    { x: 1, y: 0 },
+    { x: -1, y: 0 },
+    { x: 0, y: 1 },
+    { x: 0, y: -1 },
+  ];
+  for (const delta of deltas) {
+    const nx = x + delta.x;
+    const ny = y + delta.y;
+    if (nx < 0 || ny < 0 || nx >= grid.width || ny >= grid.height) {
+      continue;
+    }
+    neighbors.push({ x: nx, y: ny });
+  }
+  return neighbors;
+}
+
+function reconstructTilePath(
+  parents: Map<number, number>,
+  targetIdx: number,
+  startIdx: number,
+  grid: World['grid'],
+): TilePosition[] {
+  const path: TilePosition[] = [];
+  let current = targetIdx;
+  path.push(indexToPosition(grid, current));
+  while (current !== startIdx) {
+    const parent = parents.get(current);
+    if (parent === undefined) {
+      break;
+    }
+    current = parent;
+    path.push(indexToPosition(grid, current));
+  }
+  path.reverse();
+  return path;
+}
+
+function indexToPosition(grid: World['grid'], idx: number): TilePosition {
+  const x = idx % grid.width;
+  const y = Math.floor(idx / grid.width);
+  return { x, y };
 }
 
 function triggerRally(world: World, tileX: number, tileY: number): void {

@@ -105,6 +105,8 @@ export class Hud {
   private readonly darkEnergyFill: HTMLDivElement;
   private readonly darkEnergyMarkers: HTMLDivElement;
   private readonly gold: HTMLDivElement;
+  private readonly stockpile: HTMLDivElement;
+  private readonly villagers: HTMLDivElement;
 
   constructor(container: HTMLElement) {
     ensureHudStyles();
@@ -137,7 +139,13 @@ export class Hud {
     this.gold = document.createElement('div');
     this.gold.style.fontSize = '18px';
 
-    this.root.append(this.doomClock, this.darkEnergy, this.gold);
+    this.stockpile = document.createElement('div');
+    this.stockpile.style.fontSize = '18px';
+
+    this.villagers = document.createElement('div');
+    this.villagers.style.fontSize = '18px';
+
+    this.root.append(this.doomClock, this.darkEnergy, this.gold, this.stockpile, this.villagers);
     container.appendChild(this.root);
   }
 
@@ -178,5 +186,7 @@ export class Hud {
       this.darkEnergyMarkers.appendChild(markerWrapper);
     }
     this.gold.textContent = `Gold: ${snapshot.hud.gold.toFixed(0)}`;
+    this.stockpile.textContent = `Stockpile: ${snapshot.hud.resourceStockpile.toFixed(1)}`;
+    this.villagers.textContent = `Villagers: ${snapshot.hud.villagerCount.toFixed(0)} / ${snapshot.hud.villagerCapacity.toFixed(0)} (${snapshot.hud.villageMood})`;
   }
 }

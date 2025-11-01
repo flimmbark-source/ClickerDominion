@@ -219,6 +219,8 @@ export class Renderer {
           return '#8d6e63';
         case 'town':
           return '#607d8b';
+        case 'resource':
+          return '#7cb342';
         default:
           return '#4a7a46';
       }
@@ -340,6 +342,10 @@ export class Renderer {
     ctx.fillStyle = '#ffffff';
     ctx.font = '20px sans-serif';
     ctx.fillText(`Gold: ${snapshot.hud.gold.toFixed(0)}`, 20, meterY + meterHeight + 48);
+    const stockpileLine = `Stockpile: ${snapshot.hud.resourceStockpile.toFixed(1)}`;
+    const villagerLine = `Villagers: ${snapshot.hud.villagerCount.toFixed(0)} / ${snapshot.hud.villagerCapacity.toFixed(0)} (${snapshot.hud.villageMood})`;
+    ctx.fillText(stockpileLine, 20, meterY + meterHeight + 72);
+    ctx.fillText(villagerLine, 20, meterY + meterHeight + 96);
     ctx.restore();
     void balance;
   }

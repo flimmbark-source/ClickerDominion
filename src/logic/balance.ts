@@ -56,6 +56,30 @@ export interface BalanceConfig {
       corruptionReductionPerTick: number;
     };
   };
+  villages: {
+    baseSpawnIntervalSeconds: number;
+    spawnRateBoostMultiplier: number;
+    stockpileBoostThreshold: number;
+    starvationThreshold: number;
+    consumptionPerVillagerPerTick: number;
+    spawnCost: number;
+    maxStockpile: number;
+    initial: {
+      capacity: number;
+      population: number;
+      stockpile: number;
+    };
+  };
+  villagers: {
+    gatherSeconds: number;
+    depositSeconds: number;
+    idleSecondsBetweenJobs: number;
+    carryCapacity: number;
+    fleeRadius: number;
+  };
+  resources: {
+    nodes: Array<{ tileX: number; tileY: number; type: string; amount: number }>;
+  };
   corruption: {
     tileMax: number;
     tileIncreasePerTick: number;

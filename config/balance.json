@@ -60,6 +60,33 @@
       "corruptionReductionPerTick": 0.05
     }
   },
+  "villages": {
+    "baseSpawnIntervalSeconds": 5,
+    "spawnRateBoostMultiplier": 2,
+    "stockpileBoostThreshold": 40,
+    "starvationThreshold": 5,
+    "consumptionPerVillagerPerTick": 0.05,
+    "spawnCost": 4,
+    "maxStockpile": 120,
+    "initial": {
+      "capacity": 6,
+      "population": 0,
+      "stockpile": 20
+    }
+  },
+  "villagers": {
+    "gatherSeconds": 3,
+    "depositSeconds": 2,
+    "idleSecondsBetweenJobs": 1,
+    "carryCapacity": 5,
+    "fleeRadius": 3
+  },
+  "resources": {
+    "nodes": [
+      { "tileX": 3, "tileY": 6, "type": "wood", "amount": 40 },
+      { "tileX": 7, "tileY": 6, "type": "wood", "amount": 40 }
+    ]
+  },
   "corruption": {
     "tileMax": 1.0,
     "tileIncreasePerTick": 0.02,
