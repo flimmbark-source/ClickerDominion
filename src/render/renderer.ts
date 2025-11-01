@@ -156,7 +156,13 @@ export class Renderer {
 
   private drawEntity(entity: RenderEntity, balance: BalanceConfig): void {
     const ctx = this.ctx;
-    const pos = toScreen(entity.tileX, entity.tileY, balance);
+    const screenPos = toScreen(entity.tileX, entity.tileY, balance);
+    let drawX = screenPos.x;
+    let drawY = screenPos.y;
+    if (entity.kind === 'villager' && entity.panic) {
+      drawX += (Math.random() - 0.5) * 4;
+      drawY += (Math.random() - 0.5) * 4;
+    }
     const sizeW = balance.iso.tileWidth / 2;
     const sizeH = balance.iso.tileHeight / 2;
     const frame = this.atlas[entity.spriteId];
@@ -167,8 +173,8 @@ export class Renderer {
       const drawHeight = frame.sh * scale;
       const anchorX = frame.anchorX * scale;
       const anchorY = frame.anchorY * scale;
-      const destX = pos.x - anchorX;
-      const destY = pos.y + balance.iso.tileHeight / 2 - anchorY;
+      const destX = drawX - anchorX;
+      const destY = drawY + balance.iso.tileHeight / 2 - anchorY;
       ctx.drawImage(
         frame.image,
         frame.sx,
@@ -181,11 +187,11 @@ export class Renderer {
         drawHeight,
       );
     } else {
-      this.drawFallbackEntity(entity, pos.x, pos.y, sizeW, sizeH);
+      this.drawFallbackEntity(entity, drawX, drawY, sizeW, sizeH);
     }
 
     ctx.save();
-    ctx.translate(pos.x, pos.y - sizeH / 2);
+    ctx.translate(drawX, drawY - sizeH / 2);
     if (entity.hp !== undefined && entity.hpMax !== undefined) {
       this.drawHealthBar(entity.hp, entity.hpMax, sizeW, sizeH);
     }
@@ -193,6 +199,21 @@ export class Renderer {
       this.drawTownIntegrity(entity.integrity, balance.town.integrityMax, sizeW, sizeH);
     }
     ctx.restore();
+
+    if (entity.kind === 'villager' && entity.panic) {
+      ctx.save();
+      ctx.translate(drawX, drawY);
+      ctx.beginPath();
+      ctx.moveTo(0, -sizeH / 2);
+      ctx.lineTo(sizeW / 2, 0);
+      ctx.lineTo(0, sizeH / 2);
+      ctx.lineTo(-sizeW / 2, 0);
+      ctx.closePath();
+      ctx.strokeStyle = 'rgba(255, 64, 64, 0.85)';
+      ctx.lineWidth = 2;
+      ctx.stroke();
+      ctx.restore();
+    }
   }
 
   private drawFallbackEntity(
@@ -268,6 +289,9 @@ export class Renderer {
     }
     if (entity.kind === 'town') {
       return '#546e7a';
+    }
+    if (entity.kind === 'militia') {
+      return '#1e88e5';
     }
     return '#ffeb3b';
   }

@@ -79,7 +79,19 @@
     "depositSeconds": 2,
     "idleSecondsBetweenJobs": 1,
     "carryCapacity": 5,
-    "fleeRadius": 3
+    "fleeRadius": 3,
+    "panicSpeedMultiplier": 2,
+    "panicStaminaSeconds": 4,
+    "panicRestSeconds": 3,
+    "panicThreatEscalationCount": 2
+  },
+  "militia": {
+    "hp": 18,
+    "moveIntervalSeconds": 1,
+    "attackDamage": 4,
+    "attackCooldownSeconds": 1.5,
+    "autoSpawnStockpileThreshold": 10,
+    "patrolPauseSeconds": 0.5
   },
   "resources": {
     "types": {

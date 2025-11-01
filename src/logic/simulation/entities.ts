@@ -204,7 +204,8 @@ export type VillagerBehaviorState =
     }
   | { type: 'returnHome'; path: TilePosition[] }
   | { type: 'depositing'; remainingTicks: number }
-  | { type: 'fleeing'; path: TilePosition[] };
+  | { type: 'fleeing'; path: TilePosition[] }
+  | { type: 'resting'; remainingTicks: number };
 
 export interface VillagerParameters {
   readonly entityId: number;
@@ -213,6 +214,10 @@ export interface VillagerParameters {
   readonly depositTicks: number;
   readonly carryCapacity: number;
   readonly idleTicksBetweenJobs: number;
+  readonly panicStaminaTicks: number;
+  readonly panicRestTicks: number;
+  readonly panicSpeedMultiplier: number;
+  readonly panicThreatEscalationCount: number;
 }
 
 export interface TilePosition {
@@ -227,10 +232,19 @@ export class Villager {
   readonly depositTicks: number;
   readonly carryCapacity: number;
   readonly idleTicksBetweenJobs: number;
+  readonly panicSpeedMultiplier: number;
+  readonly panicThreatEscalationCount: number;
+  readonly panicRestTicks: number;
+  readonly maxPanicStamina: number;
 
   state: VillagerBehaviorState;
   carriedResource = 0;
   carriedResourceType: ResourceType | null = null;
+  panicActive = false;
+  panicStamina = 0;
+  pendingRestTicks = 0;
+  threatCloseCounter = 0;
+  lastThreatDistance: number | null = null;
 
   constructor(params: VillagerParameters) {
     this.entityId = params.entityId;
@@ -239,10 +253,16 @@ export class Villager {
     this.depositTicks = Math.max(1, params.depositTicks);
     this.carryCapacity = Math.max(1, params.carryCapacity);
     this.idleTicksBetweenJobs = Math.max(0, params.idleTicksBetweenJobs);
+    this.panicSpeedMultiplier = Math.max(1, Math.floor(params.panicSpeedMultiplier));
+    this.maxPanicStamina = Math.max(1, params.panicStaminaTicks);
+    this.panicRestTicks = Math.max(1, params.panicRestTicks);
+    this.panicThreatEscalationCount = Math.max(1, params.panicThreatEscalationCount);
     this.state = { type: 'idle', idleTicks: params.idleTicksBetweenJobs };
   }
 
   setIdle(delay: number = this.idleTicksBetweenJobs): void {
+    this.stopPanic();
+    this.resetThreatTracking();
     this.state = { type: 'idle', idleTicks: Math.max(0, delay) };
   }
 
@@ -281,7 +301,47 @@ export class Villager {
     this.state = { type: 'depositing', remainingTicks: this.depositTicks };
   }
 
-  startFleeing(path: TilePosition[]): void {
+  startFleeing(path: TilePosition[], maintainPanic = this.panicActive): void {
+    if (!maintainPanic) {
+      this.stopPanic();
+    }
+    this.resetThreatTracking();
     this.state = { type: 'fleeing', path: [...path] };
+  }
+
+  startResting(ticks?: number): void {
+    const fallback = this.pendingRestTicks > 0 ? this.pendingRestTicks : this.panicRestTicks;
+    const duration = Math.max(1, ticks ?? fallback);
+    this.stopPanic();
+    this.resetThreatTracking();
+    this.pendingRestTicks = Math.max(0, this.pendingRestTicks - duration);
+    this.state = { type: 'resting', remainingTicks: duration };
+  }
+
+  enterPanic(): void {
+    this.panicActive = true;
+    this.panicStamina = this.maxPanicStamina;
+    this.pendingRestTicks = Math.max(this.pendingRestTicks, this.panicRestTicks);
+    this.resetThreatTracking();
+  }
+
+  consumePanicStamina(steps: number): void {
+    if (!this.panicActive) {
+      return;
+    }
+    this.panicStamina = Math.max(0, this.panicStamina - steps);
+    if (this.panicStamina === 0) {
+      this.panicActive = false;
+    }
+  }
+
+  stopPanic(): void {
+    this.panicActive = false;
+    this.panicStamina = 0;
+  }
+
+  resetThreatTracking(): void {
+    this.threatCloseCounter = 0;
+    this.lastThreatDistance = null;
   }
 }

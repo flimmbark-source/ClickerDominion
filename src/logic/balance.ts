@@ -90,6 +90,18 @@ export interface BalanceConfig {
     idleSecondsBetweenJobs: number;
     carryCapacity: number;
     fleeRadius: number;
+    panicSpeedMultiplier: number;
+    panicStaminaSeconds: number;
+    panicRestSeconds: number;
+    panicThreatEscalationCount: number;
+  };
+  militia: {
+    hp: number;
+    moveIntervalSeconds: number;
+    attackDamage: number;
+    attackCooldownSeconds: number;
+    autoSpawnStockpileThreshold: number;
+    patrolPauseSeconds: number;
   };
   resources: {
     types: Record<ResourceType, ResourceTypeConfig>;

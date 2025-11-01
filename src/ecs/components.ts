@@ -93,6 +93,27 @@ export interface HeroState {
   moveCooldown: number;
 }
 
+export interface MilitiaTag {
+  villageId: Entity;
+}
+
+export type MilitiaBehaviorState =
+  | { type: 'patrol' }
+  | { type: 'engage'; targetId: Entity }
+  | { type: 'return'; path: TilePosition[] };
+
+export interface MilitiaState {
+  moveCooldown: number;
+  attackCooldown: number;
+  moveInterval: number;
+  attackInterval: number;
+  patrolRoute: TilePosition[];
+  patrolIndex: number;
+  pauseTimer: number;
+  pauseDuration: number;
+  behavior: MilitiaBehaviorState;
+}
+
 export type ComponentStores = {
   transforms: Map<Entity, Transform>;
   renderIso: Map<Entity, RenderIso>;
@@ -102,6 +123,8 @@ export type ComponentStores = {
   monsterState: Map<Entity, MonsterState>;
   hero: Set<Entity>;
   heroState: Map<Entity, HeroState>;
+  militia: Map<Entity, MilitiaTag>;
+  militiaState: Map<Entity, MilitiaState>;
   town: Map<Entity, Town>;
   corruption: Map<Entity, Corruption>;
   rallyAura: Map<Entity, RallyAura>;
@@ -124,6 +147,8 @@ export function createComponentStores(): ComponentStores {
     monsterState: new Map(),
     hero: new Set(),
     heroState: new Map(),
+    militia: new Map(),
+    militiaState: new Map(),
     town: new Map(),
     corruption: new Map(),
     rallyAura: new Map(),

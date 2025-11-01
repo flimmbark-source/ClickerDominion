@@ -16,11 +16,12 @@ export interface RenderEntity {
   tileX: number;
   tileY: number;
   spriteId: SpriteId;
-  kind: 'hero' | 'monster' | 'town' | 'loot' | 'villager';
+  kind: 'hero' | 'monster' | 'town' | 'loot' | 'villager' | 'militia';
   monsterKind?: MonsterKind;
   hp?: number;
   hpMax?: number;
   integrity?: number;
+  panic?: boolean;
 }
 
 export interface FloatingNumberView {
