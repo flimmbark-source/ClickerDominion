@@ -12,7 +12,7 @@ async function bootstrap() {
     throw new Error('#app container missing');
   }
 
-  const [balance, atlas] = await Promise.all([loadBalance(), loadSpriteAtlas()]);
+  const balance = await loadBalance();
   const world = createWorld(balance);
   const systems = createSystemPipeline();
 
@@ -25,6 +25,17 @@ async function bootstrap() {
   canvas.style.cursor = 'crosshair';
   root.style.position = 'relative';
   root.appendChild(canvas);
+
+  let atlas: Awaited<ReturnType<typeof loadSpriteAtlas>>;
+  try {
+    atlas = await loadSpriteAtlas();
+  } catch (err) {
+    console.error('Failed to load sprite atlas', err);
+    if (typeof window !== 'undefined' && typeof window.alert === 'function') {
+      window.alert('Failed to load game art. Please refresh the page.');
+    }
+    return;
+  }
 
   const renderer = new Renderer(canvas, balance, atlas);
   const hud = new Hud(root);
