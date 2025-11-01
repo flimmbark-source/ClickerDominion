@@ -13,6 +13,7 @@ export interface RenderEntity {
   id: number;
   tileX: number;
   tileY: number;
+  spriteId: string;
   kind: 'hero' | 'monster' | 'town' | 'loot';
   monsterKind?: MonsterKind;
   hp?: number;
