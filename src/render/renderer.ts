@@ -1,6 +1,7 @@
 import type { BalanceConfig } from '../logic/balance';
 import { toScreen, toTile } from './isometric';
 import type { RenderEntity, RenderSnapshot, RenderTile } from './state';
+import type { SpriteAtlas } from './sprites';
 
 function formatClock(seconds: number): string {
   const clamped = Math.max(0, seconds);
@@ -12,6 +13,7 @@ function formatClock(seconds: number): string {
 export class Renderer {
   private readonly canvas: HTMLCanvasElement;
   private readonly ctx: CanvasRenderingContext2D;
+  private readonly atlas: SpriteAtlas;
   private width = 0;
   private height = 0;
   private offsetX = 0;
@@ -20,13 +22,14 @@ export class Renderer {
   private dpr = 1;
   private hoverTile: { tileX: number; tileY: number } | null = null;
 
-  constructor(canvas: HTMLCanvasElement, balance: BalanceConfig) {
+  constructor(canvas: HTMLCanvasElement, balance: BalanceConfig, atlas: SpriteAtlas) {
     const ctx = canvas.getContext('2d');
     if (!ctx) {
       throw new Error('2D context unavailable');
     }
     this.canvas = canvas;
     this.ctx = ctx;
+    this.atlas = atlas;
     this.resize(balance);
     window.addEventListener('resize', () => this.resize(balance));
   }
@@ -156,18 +159,40 @@ export class Renderer {
     const pos = toScreen(entity.tileX, entity.tileY, balance);
     const sizeW = balance.iso.tileWidth / 2;
     const sizeH = balance.iso.tileHeight / 2;
+    const frame = this.atlas[entity.spriteId];
+    if (frame) {
+      const destX = pos.x - frame.anchorX;
+      const destY = pos.y + balance.iso.tileHeight / 2 - frame.anchorY;
+      ctx.drawImage(frame.image, frame.sx, frame.sy, frame.sw, frame.sh, destX, destY, frame.sw, frame.sh);
+    } else {
+      this.drawFallbackEntity(entity, pos.x, pos.y, sizeW, sizeH);
+    }
+
     ctx.save();
     ctx.translate(pos.x, pos.y - sizeH / 2);
-    ctx.beginPath();
-    ctx.rect(-sizeW / 4, -sizeH, sizeW / 2, sizeH);
-    ctx.fillStyle = this.getEntityFill(entity);
-    ctx.fill();
     if (entity.hp !== undefined && entity.hpMax !== undefined) {
       this.drawHealthBar(entity.hp, entity.hpMax, sizeW, sizeH);
     }
     if (entity.kind === 'town' && entity.integrity !== undefined) {
       this.drawTownIntegrity(entity.integrity, balance.town.integrityMax, sizeW, sizeH);
     }
+    ctx.restore();
+  }
+
+  private drawFallbackEntity(
+    entity: RenderEntity,
+    centerX: number,
+    centerY: number,
+    sizeW: number,
+    sizeH: number,
+  ): void {
+    const ctx = this.ctx;
+    ctx.save();
+    ctx.translate(centerX, centerY - sizeH / 2);
+    ctx.beginPath();
+    ctx.rect(-sizeW / 4, -sizeH, sizeW / 2, sizeH);
+    ctx.fillStyle = this.getFallbackFill(entity);
+    ctx.fill();
     ctx.restore();
   }
 
@@ -209,7 +234,7 @@ export class Renderer {
     return Math.max(0, Math.min(255, value)).toString(16).padStart(2, '0');
   }
 
-  private getEntityFill(entity: RenderEntity): string {
+  private getFallbackFill(entity: RenderEntity): string {
     if (entity.kind === 'hero') {
       return '#4caf50';
     }

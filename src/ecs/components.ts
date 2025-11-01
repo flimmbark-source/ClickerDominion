@@ -1,4 +1,5 @@
 import type { MonsterKind } from '../logic/balance';
+import type { SpriteId } from '../render/sprites';
 
 export type Entity = number;
 
@@ -8,7 +9,7 @@ export interface Transform {
 }
 
 export interface RenderIso {
-  spriteId: string;
+  spriteId: SpriteId;
 }
 
 export interface Health {
