@@ -40,7 +40,7 @@ export class SimulationSystem {
     private readonly dispatcher: EventDispatcher<GameEventPayloads>,
     config: SimulationSystemConfig,
   ) {
-    this.intervalMs = config.intervalMs ?? 500;
+    this.intervalMs = config.intervalMs ?? 2000;
     this.updateVillages = config.updateVillages ?? (() => undefined);
     this.updateVillagers = config.updateVillagers ?? (() => undefined);
     this.updateMonsters = config.updateMonsters ?? (() => undefined);

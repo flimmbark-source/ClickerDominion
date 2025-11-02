@@ -162,7 +162,7 @@
   },
   "monsters": {
     "base": {
-      "stepIntervalMs": 500,
+      "stepIntervalMs": 2000,
       "attack": {
         "damage": 2,
         "cooldownMs": 1000

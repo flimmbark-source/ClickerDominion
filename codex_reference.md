@@ -168,7 +168,7 @@ codex_reference.md
     }
   },
   "monsters": {
-    "base": { "stepIntervalMs": 500, "attack": { "damage": 2, "cooldownMs": 1000 } },
+    "base": { "stepIntervalMs": 2000, "attack": { "damage": 2, "cooldownMs": 1000 } },
     "kinds": {
       "imp": { "hp": 8, "speedMul": 1.0, "damageMul": 1.0 },
       "brute": { "hp": 20, "speedMul": 0.8, "damageMul": 1.5 },
