@@ -4,6 +4,14 @@ import { Village, Villager, type TilePosition } from '../logic/simulation/entiti
 
 export type Entity = number;
 
+export const RESOURCE_NODE_TYPES = ['wood', 'stone', 'food'] as const;
+export type ResourceNodeType = (typeof RESOURCE_NODE_TYPES)[number];
+
+export interface ResourceComponent {
+  type: ResourceNodeType;
+  amount: number;
+}
+
 export interface Transform {
   tileX: number;
   tileY: number;
@@ -119,6 +127,7 @@ export type ComponentStores = {
   renderIso: Map<Entity, RenderIso>;
   health: Map<Entity, Health>;
   clickable: Set<Entity>;
+  resource: Map<Entity, ResourceComponent>;
   monster: Map<Entity, MonsterTag>;
   monsterState: Map<Entity, MonsterState>;
   hero: Set<Entity>;
@@ -143,6 +152,7 @@ export function createComponentStores(): ComponentStores {
     renderIso: new Map(),
     health: new Map(),
     clickable: new Set(),
+    resource: new Map(),
     monster: new Map(),
     monsterState: new Map(),
     hero: new Set(),
