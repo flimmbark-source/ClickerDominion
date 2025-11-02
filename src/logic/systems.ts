@@ -22,6 +22,7 @@ import { GameEvent, type GameEventPayloads, type GameEventMessage } from './even
 import type { DarkEnergyMarkerView } from '../render/state';
 import type { VillageMood, TilePosition } from './simulation/entities';
 import type { ResourceType, MonsterKind } from './balance';
+import { reportCheckPass, reportCheckFail } from '../utils/checks';
 
 export type System = (world: World) => void;
 
@@ -777,8 +778,8 @@ function performMonsterRoam(world: World, transform: Transform, occupied: Set<nu
   return true;
 }
 
-function gatherVillageEdgeTargets(world: World): TilePosition[] {
-  const targets: TilePosition[] = [];
+function gatherVillageEdgeTargets(world: World): Array<{ position: TilePosition; townId: Entity }> {
+  const targets: Array<{ position: TilePosition; townId: Entity }> = [];
   const seen = new Set<number>();
   for (const [entity] of world.components.town.entries()) {
     const transform = world.components.transforms.get(entity);
@@ -791,7 +792,7 @@ function gatherVillageEdgeTargets(world: World): TilePosition[] {
         continue;
       }
       seen.add(idx);
-      targets.push(neighbor);
+      targets.push({ position: neighbor, townId: entity });
     }
   }
   return targets;
@@ -801,33 +802,33 @@ function createWanderTowardVillageState(
   world: World,
   startX: number,
   startY: number,
-  targets: TilePosition[],
+  targets: Array<{ position: TilePosition; townId: Entity }>,
   occupied: Set<number>,
 ): MonsterBehaviorState {
   if (targets.length === 0) {
     return createMonsterRoamState(world);
   }
-  let bestTarget: TilePosition | null = null;
-  let bestLength = Infinity;
-  for (const target of targets) {
+  let best: { target: TilePosition; length: number; townId: Entity } | null = null;
+  for (const candidate of targets) {
     const path = findPathBfs(
       world.grid,
       { x: startX, y: startY },
-      target,
+      candidate.position,
       (x, y) => canMonsterStep(world, occupied, x, y, startX, startY),
     );
     if (path.length === 0) {
       continue;
     }
-    if (path.length < bestLength) {
-      bestLength = path.length;
-      bestTarget = target;
+    if (!best || path.length < best.length) {
+      best = { target: candidate.position, length: path.length, townId: candidate.townId };
     }
   }
-  if (!bestTarget) {
+  if (!best) {
+    reportCheckFail('monsterPathTown', 'No path found to any town edge');
     return createMonsterRoamState(world);
   }
-  return { type: 'wanderTowardVillage', target: bestTarget };
+  reportCheckPass('monsterPathTown', `Targeting town ${best.townId}`);
+  return { type: 'wanderTowardVillage', target: best.target };
 }
 
 function findNearestVillagerWithinRadius(
@@ -980,7 +981,20 @@ function handleTownContact(world: World, tileX: number, tileY: number, corruptin
   }
   const balance = world.balance;
   corruptingTiles.add(gridIndex(world.grid, targetX, targetY));
-  town.integrity = Math.max(0, town.integrity - balance.monsters.base.attack.damage);
+  const damage = balance.monsters.base.attack.damage;
+  if (damage <= 0) {
+    reportCheckFail('monsterDamageTown', 'Monster attack damage is non-positive');
+    return;
+  }
+  const previousIntegrity = town.integrity;
+  town.integrity = Math.max(0, town.integrity - damage);
+  if (town.integrity === 0 && previousIntegrity > 0) {
+    reportCheckPass('monsterDamageTown', 'Town destroyed');
+  } else if (town.integrity < previousIntegrity) {
+    reportCheckPass('monsterDamageTown', `Integrity reduced to ${town.integrity}`);
+  } else {
+    reportCheckFail('monsterDamageTown', 'Monster attack failed to damage town');
+  }
   tile.corruptProgress = Math.min(1, tile.corruptProgress + balance.town.corruptProgressPerTick);
   tile.corruption = Math.max(tile.corruption, tile.corruptProgress);
   if (town.integrity === 0) {
@@ -1066,7 +1080,18 @@ function spawningSystem(world: World): void {
     for (let i = 0; i < spawnCount; i += 1) {
       const spawnTile = findEdgeSpawnPosition(world, occupied);
       if (!spawnTile) {
+        reportCheckFail('edgeSpawn', 'No edge spawn tile available');
         break;
+      }
+      const isEdge =
+        spawnTile.x === 0 ||
+        spawnTile.y === 0 ||
+        spawnTile.x === world.grid.width - 1 ||
+        spawnTile.y === world.grid.height - 1;
+      if (!isEdge) {
+        reportCheckFail('edgeSpawn', `Spawned at non-edge tile (${spawnTile.x}, ${spawnTile.y})`);
+      } else {
+        reportCheckPass('edgeSpawn', `Edge tile (${spawnTile.x}, ${spawnTile.y})`);
       }
       const kind = selectSpawnMonsterKind(world, spawner.wavesSpawned, villagerCount);
       spawnMonster(world, spawnTile.x, spawnTile.y, kind);
@@ -1077,8 +1102,14 @@ function spawningSystem(world: World): void {
     const difficulty = 1 + spawner.wavesSpawned / 3 + world.time.tick / Math.max(1, world.balance.ticksPerSecond * 90);
     const pressure = 1 + villagerCount / Math.max(1, world.balance.villages.initial.capacity);
     const intervalDivisor = Math.max(1, difficulty + pressure / 2);
-    const nextInterval = Math.max(spawner.minIntervalTicks, Math.round(spawner.baseIntervalTicks / intervalDivisor));
-    spawner.timer = nextInterval;
+    const rawInterval = Math.round(spawner.baseIntervalTicks / intervalDivisor);
+    const safeInterval = Number.isFinite(rawInterval) && rawInterval > 0 ? rawInterval : spawner.minIntervalTicks;
+    if (!Number.isFinite(rawInterval) || rawInterval <= 0) {
+      reportCheckFail('endlessWaves', `Invalid spawn interval computed: ${rawInterval}`);
+    } else {
+      reportCheckPass('endlessWaves', `Next wave scheduled in ${safeInterval} ticks`);
+    }
+    spawner.timer = Math.max(spawner.minIntervalTicks, safeInterval);
   }
 
   for (const [entity, spawnPoint] of world.components.spawnPoint.entries()) {
@@ -1324,6 +1355,9 @@ function renderSyncSystem(world: World): void {
   const resourceGoal = Math.max(0, world.balance.victory.resourceGoal);
   const timeSurvived =
     world.runState.status === 'running' ? world.time.seconds : world.runState.finalTimeSeconds;
+  const townsAlive = world.components.town.size;
+  const nextWaveSeconds =
+    Math.max(0, world.monsterSpawner.timer) / Math.max(1, world.balance.ticksPerSecond);
   snapshot.hud = {
     doomClockSeconds: doom?.seconds ?? 0,
     darkEnergy: {
@@ -1338,6 +1372,8 @@ function renderSyncSystem(world: World): void {
     villagerCapacity,
     resourceStockpile,
     villageMood,
+    townsAlive,
+    nextWaveSeconds,
   };
   snapshot.run = {
     status: world.runState.status,
@@ -1909,6 +1945,16 @@ function trySpawnWave(world: World): boolean {
     const idx = gridIndex(world.grid, candidate.x, candidate.y);
     if (occupied.has(idx)) {
       continue;
+    }
+    const isEdge =
+      candidate.x === padding ||
+      candidate.y === padding ||
+      candidate.x === world.grid.width - padding - 1 ||
+      candidate.y === world.grid.height - padding - 1;
+    if (!isEdge) {
+      reportCheckFail('edgeSpawn', `Dark wave spawn at non-edge tile (${candidate.x}, ${candidate.y})`);
+    } else {
+      reportCheckPass('edgeSpawn', `Edge tile (${candidate.x}, ${candidate.y})`);
     }
     spawnMonster(world, candidate.x, candidate.y, wave.monsterKind);
     occupied.add(idx);

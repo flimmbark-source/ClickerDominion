@@ -138,6 +138,8 @@ function baseRenderSnapshot(): RenderSnapshot {
       villagerCapacity: 0,
       resourceStockpile: 0,
       villageMood: 'normal',
+      townsAlive: 0,
+      nextWaveSeconds: 0,
     },
     run: {
       status: 'running',

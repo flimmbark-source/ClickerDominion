@@ -371,6 +371,10 @@ export class Renderer {
     const villagerLine = `Villagers: ${snapshot.hud.villagerCount.toFixed(0)} / ${snapshot.hud.villagerCapacity.toFixed(0)} (${snapshot.hud.villageMood})`;
     ctx.fillText(stockpileLine, 20, meterY + meterHeight + 72);
     ctx.fillText(villagerLine, 20, meterY + meterHeight + 96);
+    const townsLine = `Towns Alive: ${snapshot.hud.townsAlive.toFixed(0)}`;
+    const nextWaveLine = `Next Wave In: ${formatClock(Math.max(0, snapshot.hud.nextWaveSeconds))}`;
+    ctx.fillText(townsLine, 20, meterY + meterHeight + 120);
+    ctx.fillText(nextWaveLine, 20, meterY + meterHeight + 144);
     ctx.restore();
     void balance;
   }
