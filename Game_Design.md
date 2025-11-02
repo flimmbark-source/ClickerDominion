@@ -1,126 +1,119 @@
-1. 🧠 Game Overview
+### Clicker Dominion: Game Design Blueprint
 
-Title: Clicker Dominion
-Genre: Isometric Clicker / Auto Strategy / Roguelike
-Loop: Player clicks and assists auto-villagers in gathering resources and defending villages, while a Doom Clock counts down. The Dark Lord AI corrupts tiles, spawns enemies, and tries to overwhelm the board.
+---
 
-2. 🔧 Core Systems (Modules Codex Can Build)
-📦 Tile System
+### 1. 🧠 Game Overview
 
-10x10 Grid (100 tiles).
+**Title:** Clicker Dominion
+**Genre:** Isometric Clicker / Auto Strategy / Roguelike
+**Core Loop:** Player supports autonomous villagers by clicking and managing resources while defending against escalating threats from the Dark Lord AI. Doom Clock pressures the player with inevitable corruption, pushing them toward repeated meta-progression.
 
-Each tile can be:
+---
 
-Empty
+### 2. 🔧 Core Systems (Modules)
 
-Village
+#### 📦 Tile System
 
-Resource Node
+* **Grid:** 10x10 (100 total tiles).
+* **Tile States:** `empty`, `village`, `resource`, `corrupted`, `purified`
+* **Tile Content:** Can hold entities (villagers, enemies, etc.)
 
-Corrupted
+#### 👨‍🌾 Villager AI
 
-Purified
+* **Spawn Point:** Villages.
+* **Behavior:**
 
-Tiles can hold entities (villagers, enemies, etc.)
+  * Seek nearest `resource` tile
+  * Harvest for a set time
+  * Return to originating village
+  * Can be attacked and killed by enemies
 
-👨‍🌾 Villager AI
+#### 🧟 Monster AI (Dark Lord Minions)
 
-Villagers spawn from villages.
+* **Spawn Point:** Corrupted tiles or enemy spawn zones
+* **Behavior:**
 
-Seek nearest resource node.
+  * Target villagers and villages
+  * Attack on contact
+  * Kill to gain dark energy
+  * Destroy villages to remove them from map
 
-Harvest and return to village.
+#### ⏱️ Doom Clock
 
-Can die from monsters.
+* **Timer:** Ticks down once per second
+* **Player Adds Time By:**
 
-🧟 Monster AI (Dark Lord Minions)
+  * Killing enemies
+  * Saving villagers
+  * Purifying corrupted tiles
+* **Dark Lord Removes Time By:**
 
-Spawn from corruption points.
+  * Killing villagers
+  * Destroying villages
+  * Corrupting tiles
 
-Seek out villages or villagers.
+#### 💀 Dark Lord AI Director
 
-Kill to gain dark energy.
+* **Energy Source:** Dark deeds (kills, destruction, corruption)
+* **Spends Energy On:**
 
-Destroy villages to remove them from the map.
+  * Stronger enemies
+  * More corruption
+  * Faster Doom Clock decay
 
-⏱️ Doom Clock
+#### ⚔️ Combat
 
-Ticks down every second.
+* **Player:** Click enemies to damage
+* **Villagers:** Passive, may upgrade to self-defense
+* **Enemies:** Attack villagers/villages
 
-Player can add time by:
+#### 🏅 Valor System
 
-Killing monsters.
+* **Earned From:** Heroic deeds (purification, protection, defense)
+* **Used In:** Meta-layer to buy permanent upgrades
 
-Saving villagers.
+---
 
-Purifying tiles.
+### 3. 🔢 Entity Definitions
 
-Dark Lord can remove time by:
+**Villager**
 
-Killing villagers.
-
-Destroying villages.
-
-Corrupting tiles.
-
-💀 Dark Lord AI Director
-
-Gains dark energy through "dark deeds."
-
-Spends energy to:
-
-Spawn tougher enemies.
-
-Corrupt more tiles.
-
-Shorten Doom Clock.
-
-⚔️ Combat
-
-Player can click enemies to damage them.
-
-Villagers may eventually gain self-defense.
-
-Enemies can attack villages/villagers.
-
-🏅 Valor System
-
-Player earns Valor from heroic deeds.
-
-Stored and carried to meta-layer.
-
-3. 🔢 Entity Definitions
-
-Villager:
-
+```json
 {
   "type": "villager",
   "health": 10,
   "speed": 1,
   "state": "idle" | "gathering" | "returning" | "dead"
 }
+```
 
+**Enemy**
 
-Enemy:
-
+```json
 {
   "type": "enemy",
   "health": 20,
   "speed": 0.5,
   "target": "village" | "villager"
 }
+```
 
+**Tile**
 
-Tile:
-
+```json
 {
   "x": 0,
   "y": 0,
   "type": "empty" | "village" | "resource" | "corrupted",
   "entities": []
 }
+```
 
-4. 🔁 Game Flow Summary
+---
+
+### 4. 🔁 Game Flow Summary
+
+```
 START
 → Generate board (10x10)
 → Place starting village
@@ -133,27 +126,34 @@ START
 → Player spends Valor, chooses upgrades
 → Restart with new board and retained upgrades
 → Repeat
+```
 
-5. 🧬 Meta Layer (Upgrades)
+---
 
-Upgrades fall into 2 types:
+### 5. 🦮 Meta Layer (Permanent Upgrades)
 
-1. Strategic (permanent + game-changing):
+**Types:**
 
-Unlock Spells (e.g. fireball, heal)
+#### Strategic Upgrades (Game-changing)
 
-Auto-purify tiles after defeating monsters
+* Unlock Spells (e.g. fireball, heal, slow)
+* Auto-purify tiles after enemy death
+* Multi-resource carrying villagers
+* Hero Units (strong, semi-autonomous)
 
-Multi-resource villagers
+#### Incremental Upgrades (Stat buffs)
 
-Hero Villagers (stronger, fight-capable)
+* +10% Villager HP
+* +1s for every heroic act
+* +5% click damage
+* -5% Enemy spawn rate
 
-2. Incremental:
+---
 
-Villager HP +10%
+### Usage Instructions (For Codex)
 
-+1 second for each heroic act
+* Reference modules by name (e.g., "implement Villager AI from Section 2")
+* Pass relevant entity structure JSON for clarity
+* Be explicit with logic goals: avoid vague instructions
 
-+5% click damage
-
-Enemy spawn rate slightly reduced
+---
