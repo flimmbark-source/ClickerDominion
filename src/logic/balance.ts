@@ -169,6 +169,10 @@ export interface BalanceConfig {
     showGrid: boolean;
     showPathDebug: boolean;
   };
+  victory: {
+    surviveMinutes: number;
+    resourceGoal: number;
+  };
 }
 
 export type MonsterKind = 'imp' | 'brute' | 'wisp';

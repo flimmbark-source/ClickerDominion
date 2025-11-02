@@ -42,6 +42,7 @@ export function createSystemPipeline(): System[] {
     corruptionSystem,
     spawningSystem,
     economySystem,
+    winLossSystem,
     renderSyncSystem,
   ];
 }
@@ -366,18 +367,22 @@ function villagerAiSystem(world: World): void {
         if (villager.state.remainingTicks > 0) {
           break;
         }
-        if (villager.carriedResource > 0) {
+        const delivered = villager.carriedResource;
+        if (delivered > 0) {
           const village = world.components.villages.get(villager.homeVillageId);
           const resourceType = villager.carriedResourceType;
-          if (village && resourceType) {
-            const resourceDef = world.balance.resources.types[resourceType];
-            if (resourceDef) {
-              village.deliverResources(villager.carriedResource, resourceDef.effects);
+          if (village) {
+            if (resourceType) {
+              const resourceDef = world.balance.resources.types[resourceType];
+              if (resourceDef) {
+                village.deliverResources(delivered, resourceDef.effects);
+              } else {
+                village.addResources(delivered);
+              }
             } else {
-              village.addResources(villager.carriedResource);
+              village.addResources(delivered);
             }
-          } else if (village) {
-            village.addResources(villager.carriedResource);
+            world.stats.resourcesGathered += delivered;
           }
         }
         villager.carriedResource = 0;
@@ -1136,6 +1141,46 @@ function economySystem(world: World): void {
   world.economy.shards = Math.max(0, world.economy.shards);
 }
 
+function finishRun(
+  world: World,
+  status: 'won' | 'lost',
+  reason: string,
+  completed: 'survival' | 'resource' | 'extinction',
+): void {
+  if (world.runState.status !== 'running') {
+    return;
+  }
+  world.runState.status = status;
+  world.runState.reason = reason;
+  world.runState.completedCondition = completed;
+  world.runState.finalTimeSeconds = world.time.seconds;
+  world.runState.endTick = world.time.tick;
+}
+
+function winLossSystem(world: World): void {
+  if (world.runState.status !== 'running') {
+    return;
+  }
+
+  const villageEntry = world.components.villages.entries().next();
+  const village = villageEntry.done ? null : villageEntry.value[1];
+  if (village && world.runState.populationEverPositive && village.population <= 0) {
+    finishRun(world, 'lost', 'All villagers were lost.', 'extinction');
+    return;
+  }
+
+  const surviveGoalSeconds = Math.max(0, Math.round(world.balance.victory.surviveMinutes * 60));
+  if (surviveGoalSeconds > 0 && world.time.seconds >= surviveGoalSeconds) {
+    finishRun(world, 'won', 'You survived the required time.', 'survival');
+    return;
+  }
+
+  const resourceGoal = Math.max(0, world.balance.victory.resourceGoal);
+  if (resourceGoal > 0 && world.stats.resourcesGathered >= resourceGoal) {
+    finishRun(world, 'won', 'You gathered enough resources.', 'resource');
+  }
+}
+
 function renderSyncSystem(world: World): void {
   const snapshot = world.view;
   snapshot.tiles = [];
@@ -1250,6 +1295,29 @@ function renderSyncSystem(world: World): void {
     resourceStockpile = village.resourceStockpile;
     villageMood = village.getMood();
   }
+  let activeGatherers = 0;
+  for (const [, villager] of world.components.villagers.entries()) {
+    const stateType = villager.state.type;
+    if (
+      stateType === 'travelToResource' ||
+      stateType === 'gathering' ||
+      stateType === 'returnHome' ||
+      stateType === 'depositing'
+    ) {
+      activeGatherers += 1;
+    }
+  }
+  let monstersChasingVillagers = 0;
+  for (const [, monsterState] of world.components.monsterState.entries()) {
+    const behavior = monsterState.behavior.type;
+    if (behavior === 'chaseVillager' || behavior === 'attackVillager') {
+      monstersChasingVillagers += 1;
+    }
+  }
+  const surviveGoalSeconds = Math.max(0, Math.round(world.balance.victory.surviveMinutes * 60));
+  const resourceGoal = Math.max(0, world.balance.victory.resourceGoal);
+  const timeSurvived =
+    world.runState.status === 'running' ? world.time.seconds : world.runState.finalTimeSeconds;
   snapshot.hud = {
     doomClockSeconds: doom?.seconds ?? 0,
     darkEnergy: {
@@ -1264,6 +1332,23 @@ function renderSyncSystem(world: World): void {
     villagerCapacity,
     resourceStockpile,
     villageMood,
+  };
+  snapshot.run = {
+    status: world.runState.status,
+    timeSurvivedSeconds: timeSurvived,
+    villagersBorn: world.stats.villagersBorn,
+    resourcesGathered: world.stats.resourcesGathered,
+    surviveGoalSeconds,
+    resourceGoal,
+    completedCondition: world.runState.completedCondition,
+    reason: world.runState.reason,
+  };
+  snapshot.debug = {
+    villagerCount,
+    monsterCount: world.components.monster.size,
+    activeGatherers,
+    monstersChasingVillagers,
+    resourceStockpile,
   };
 }
 

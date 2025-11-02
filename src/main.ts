@@ -102,6 +102,10 @@ function startLoop(
     last = now;
     accumulator += delta;
     while (accumulator >= stepMs) {
+      if (world.runState.status !== 'running') {
+        accumulator = 0;
+        break;
+      }
       for (const system of systems) {
         system(world);
       }
