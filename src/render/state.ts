@@ -1,3 +1,4 @@
+import type { ResourceNodeType } from '../ecs/components';
 import type { TileType } from '../ecs/world';
 import type { MonsterKind } from '../logic/balance';
 import type { VillageMood } from '../logic/simulation/entities';
@@ -22,6 +23,14 @@ export interface RenderEntity {
   hpMax?: number;
   integrity?: number;
   panic?: boolean;
+}
+
+export interface RenderResource {
+  id: number;
+  tileX: number;
+  tileY: number;
+  type: ResourceNodeType;
+  amount: number;
 }
 
 export interface FloatingNumberView {
@@ -83,6 +92,7 @@ export interface HudState {
 export interface RenderSnapshot {
   tiles: RenderTile[];
   entities: RenderEntity[];
+  resources: RenderResource[];
   floating: FloatingNumberView[];
   hud: HudState;
   run: RunSummaryView;

@@ -1,6 +1,6 @@
 import type { BalanceConfig } from '../logic/balance';
 import { toScreen, toTile } from './isometric';
-import type { RenderEntity, RenderSnapshot, RenderTile } from './state';
+import type { RenderEntity, RenderResource, RenderSnapshot, RenderTile } from './state';
 import type { SpriteAtlas } from './sprites';
 
 function formatClock(seconds: number): string {
@@ -53,6 +53,13 @@ export class Renderer {
       if (highlight) {
         this.drawTileHighlight(highlight, balance);
       }
+    }
+
+    const sortedResources = [...snapshot.resources].sort(
+      (a, b) => (a.tileY - b.tileY) || (a.tileX - b.tileX),
+    );
+    for (const resource of sortedResources) {
+      this.drawResource(resource, balance);
     }
 
     const sortedEntities = [...snapshot.entities].sort((a, b) => (a.tileY - b.tileY) || (a.tileX - b.tileX));
@@ -217,6 +224,21 @@ export class Renderer {
     }
   }
 
+  private drawResource(resource: RenderResource, balance: BalanceConfig): void {
+    const ctx = this.ctx;
+    const pos = toScreen(resource.tileX, resource.tileY, balance);
+    const size = Math.max(4, Math.round(balance.iso.tileWidth * 0.2));
+    const baseX = pos.x - size / 2;
+    const baseY = pos.y + balance.iso.tileHeight / 2 - size - 2;
+    ctx.save();
+    ctx.fillStyle = this.getResourceColor(resource.type);
+    ctx.fillRect(baseX, baseY, size, size);
+    ctx.strokeStyle = 'rgba(0, 0, 0, 0.45)';
+    ctx.lineWidth = 1;
+    ctx.strokeRect(baseX, baseY, size, size);
+    ctx.restore();
+  }
+
   private drawFallbackEntity(
     entity: RenderEntity,
     centerX: number,
@@ -295,6 +317,19 @@ export class Renderer {
       return '#1e88e5';
     }
     return '#ffeb3b';
+  }
+
+  private getResourceColor(type: RenderResource['type']): string {
+    switch (type) {
+      case 'wood':
+        return '#8d6e63';
+      case 'stone':
+        return '#9e9e9e';
+      case 'food':
+        return '#7cb342';
+      default:
+        return '#ffffff';
+    }
   }
 
   private drawHealthBar(hp: number, max: number, sizeW: number, sizeH: number): void {

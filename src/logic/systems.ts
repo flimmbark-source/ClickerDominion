@@ -6,6 +6,7 @@ import type {
   MilitiaState,
   MilitiaTag,
 } from '../ecs/components';
+import { RESOURCE_NODE_TYPES } from '../ecs/components';
 import {
   getTile,
   gridIndex,
@@ -13,6 +14,8 @@ import {
   spawnMonster,
   spawnVillager,
   spawnMilitia,
+  spawnResourceNode,
+  getResourcePlacementCandidates,
   type FloatingNumber,
   type World,
 } from '../ecs/world';
@@ -42,6 +45,7 @@ export function createSystemPipeline(): System[] {
     darkLordSystem,
     corruptionSystem,
     spawningSystem,
+    resourceSpawnerSystem,
     economySystem,
     winLossSystem,
     renderSyncSystem,
@@ -1171,6 +1175,23 @@ function selectSpawnMonsterKind(world: World, waveCount: number, villagerCount: 
   return 'imp';
 }
 
+function resourceSpawnerSystem(world: World): void {
+  if (world.time.tick % 30 !== 0) {
+    return;
+  }
+
+  const candidates = getResourcePlacementCandidates(world);
+  if (candidates.length === 0) {
+    return;
+  }
+
+  const tileIndex = Math.floor(world.rng.range(0, candidates.length));
+  const candidate = candidates[tileIndex];
+  const typeIndex = Math.floor(world.rng.range(0, RESOURCE_NODE_TYPES.length));
+  const type = RESOURCE_NODE_TYPES[typeIndex];
+  spawnResourceNode(world, candidate.x, candidate.y, type, 1);
+}
+
 function economySystem(world: World): void {
   // Currently economy updates occur on kill events.
   // Clamp values to non-negative to avoid numeric drift.
@@ -1233,6 +1254,21 @@ function renderSyncSystem(world: World): void {
         type: tile.type,
       });
     }
+  }
+
+  snapshot.resources = [];
+  for (const [entity, resource] of world.components.resource.entries()) {
+    const transform = world.components.transforms.get(entity);
+    if (!transform) {
+      continue;
+    }
+    snapshot.resources.push({
+      id: entity,
+      tileX: transform.tileX,
+      tileY: transform.tileY,
+      type: resource.type,
+      amount: resource.amount,
+    });
   }
 
   snapshot.entities = [];

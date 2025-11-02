@@ -13,6 +13,9 @@ import {
   type Transform,
   type RenderIso,
   type Health,
+  type ResourceComponent,
+  RESOURCE_NODE_TYPES,
+  type ResourceNodeType,
   type MonsterTag,
   type HeroState,
   type MonsterState,
@@ -127,6 +130,7 @@ function baseRenderSnapshot(): RenderSnapshot {
   return {
     tiles: [],
     entities: [],
+    resources: [],
     floating: [],
     hud: {
       doomClockSeconds: 0,
@@ -204,6 +208,7 @@ export function createWorld(balance: BalanceConfig): World {
   };
 
   spawnInitialEntities(world);
+  seedInitialResourceNodes(world, 10);
   return world;
 }
 
@@ -221,6 +226,7 @@ export function removeEntity(world: World, entity: Entity): void {
   components.renderIso.delete(entity);
   components.health.delete(entity);
   components.clickable.delete(entity);
+  components.resource.delete(entity);
   components.monster.delete(entity);
   components.monsterState.delete(entity);
   components.hero.delete(entity);
@@ -249,6 +255,10 @@ function addRenderIso(world: World, entity: Entity, data: RenderIso): void {
 
 function addHealth(world: World, entity: Entity, data: Health): void {
   world.components.health.set(entity, data);
+}
+
+function addResource(world: World, entity: Entity, data: ResourceComponent): void {
+  world.components.resource.set(entity, data);
 }
 
 function addMonster(world: World, entity: Entity, data: MonsterTag, state: MonsterState): void {
@@ -389,6 +399,65 @@ function spawnInitialEntities(world: World): void {
       resourceTile.resourceNode = resourceNode;
     }
   }
+}
+
+function seedInitialResourceNodes(world: World, count: number): void {
+  const candidates = getResourcePlacementCandidates(world);
+  let remaining = Math.max(0, Math.floor(count));
+  while (remaining > 0 && candidates.length > 0) {
+    const tileIndex = Math.floor(world.rng.range(0, candidates.length));
+    const [candidate] = candidates.splice(tileIndex, 1);
+    const typeIndex = Math.floor(world.rng.range(0, RESOURCE_NODE_TYPES.length));
+    const type = RESOURCE_NODE_TYPES[typeIndex];
+    spawnResourceNode(world, candidate.x, candidate.y, type, 1);
+    remaining -= 1;
+  }
+}
+
+export function getResourcePlacementCandidates(world: World): Array<{ x: number; y: number }> {
+  const occupied = new Set<string>();
+  for (const transform of world.components.transforms.values()) {
+    occupied.add(`${transform.tileX},${transform.tileY}`);
+  }
+
+  const candidates: Array<{ x: number; y: number }> = [];
+  for (let y = 0; y < world.grid.height; y += 1) {
+    for (let x = 0; x < world.grid.width; x += 1) {
+      const tile = getTile(world.grid, x, y);
+      if (!tile || tile.type !== 'plain') {
+        continue;
+      }
+      if (occupied.has(`${x},${y}`)) {
+        continue;
+      }
+      candidates.push({ x, y });
+    }
+  }
+  return candidates;
+}
+
+export function spawnResourceNode(
+  world: World,
+  tileX: number,
+  tileY: number,
+  type: ResourceNodeType,
+  amount = 1,
+): Entity | null {
+  const tile = getTile(world.grid, tileX, tileY);
+  if (!tile) {
+    return null;
+  }
+  if (isTileOccupied(world, tileX, tileY)) {
+    return null;
+  }
+  const normalizedAmount = amount > 0 ? amount : 1;
+  const entity = createEntity(world);
+  addTransform(world, entity, { tileX, tileY });
+  addResource(world, entity, { type, amount: normalizedAmount });
+  if (tile.type === 'plain') {
+    tile.type = 'resource';
+  }
+  return entity;
 }
 
 export function spawnVillager(world: World, villageEntity: Entity): Entity | null {
