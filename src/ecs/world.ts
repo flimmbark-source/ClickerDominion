@@ -95,6 +95,9 @@ export interface World {
     villagersBorn: number;
     resourcesGathered: number;
   };
+  meta: {
+    resources: Record<ResourceNodeType, number>;
+  };
   runState: {
     status: 'running' | 'won' | 'lost';
     reason: string | null;
@@ -197,6 +200,12 @@ export function createWorld(balance: BalanceConfig): World {
       villagersBorn: 0,
       resourcesGathered: 0,
     },
+    meta: {
+      resources: Object.fromEntries(RESOURCE_NODE_TYPES.map((type) => [type, 0])) as Record<
+        ResourceNodeType,
+        number
+      >,
+    },
     runState: {
       status: 'running',
       reason: null,
@@ -222,11 +231,14 @@ export function removeEntity(world: World, entity: Entity): void {
   world.entities.delete(entity);
   world.entityManager.removeEntity(entity);
   const { components } = world;
+  components.positions.delete(entity);
   components.transforms.delete(entity);
   components.renderIso.delete(entity);
   components.health.delete(entity);
   components.clickable.delete(entity);
   components.resource.delete(entity);
+  components.taskIntents.delete(entity);
+  components.inventories.delete(entity);
   components.monster.delete(entity);
   components.monsterState.delete(entity);
   components.hero.delete(entity);
@@ -247,6 +259,7 @@ export function removeEntity(world: World, entity: Entity): void {
 
 function addTransform(world: World, entity: Entity, data: Transform): void {
   world.components.transforms.set(entity, data);
+  world.components.positions.set(entity, { x: data.tileX, y: data.tileY });
 }
 
 function addRenderIso(world: World, entity: Entity, data: RenderIso): void {
