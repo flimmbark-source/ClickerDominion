@@ -392,19 +392,25 @@ function villagerAiSystem(world: World): void {
       }
 
       case 'fleeing': {
-        const stepsPerTick = villager.panicActive
+        const speedBudget = villager.panicActive
           ? Math.max(1, villager.panicSpeedMultiplier)
           : 1;
+        const maxBudget = villager.panicActive
+          ? Math.max(1, villager.panicSpeedMultiplier)
+          : 1;
+        villager.fleeMoveBudget = Math.min(villager.fleeMoveBudget + speedBudget, maxBudget);
+
         let stepsTaken = 0;
-        while (stepsTaken < stepsPerTick && villager.state.path.length > 0) {
+        if (villager.fleeMoveBudget >= 1 && villager.state.path.length > 0) {
           const next = villager.state.path.shift();
-          if (!next) {
-            break;
+          if (next) {
+            transform.tileX = next.x;
+            transform.tileY = next.y;
+            villager.fleeMoveBudget -= 1;
+            stepsTaken = 1;
           }
-          transform.tileX = next.x;
-          transform.tileY = next.y;
-          stepsTaken += 1;
         }
+
         if (stepsTaken > 0) {
           villager.consumePanicStamina(stepsTaken);
         }
