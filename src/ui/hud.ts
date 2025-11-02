@@ -80,6 +80,69 @@ function ensureHudStyles(): void {
       font-size: 11px;
       text-shadow: 0 0 4px rgba(0, 0, 0, 0.8);
     }
+    .hud-debug-panel {
+      position: absolute;
+      top: 16px;
+      right: 16px;
+      padding: 12px 16px;
+      border-radius: 8px;
+      background: rgba(0, 0, 0, 0.55);
+      border: 1px solid rgba(255, 255, 255, 0.2);
+      color: #ffffff;
+      font-family: sans-serif;
+      font-size: 14px;
+      line-height: 1.4;
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+      pointer-events: none;
+      box-shadow: 0 0 12px rgba(0, 0, 0, 0.4);
+      z-index: 2;
+    }
+    .hud-summary-overlay {
+      position: absolute;
+      top: 50%;
+      left: 50%;
+      transform: translate(-50%, -50%);
+      padding: 24px 32px;
+      border-radius: 12px;
+      background: rgba(0, 0, 0, 0.85);
+      border: 1px solid rgba(255, 255, 255, 0.25);
+      color: #ffffff;
+      font-family: sans-serif;
+      text-align: center;
+      min-width: 280px;
+      max-width: 420px;
+      display: none;
+      flex-direction: column;
+      gap: 12px;
+      pointer-events: none;
+      box-shadow: 0 0 24px rgba(0, 0, 0, 0.5);
+      z-index: 3;
+    }
+    .hud-summary-overlay--visible {
+      display: flex;
+    }
+    .hud-summary-title {
+      font-size: 36px;
+      font-weight: 700;
+      letter-spacing: 0.16em;
+      text-transform: uppercase;
+    }
+    .hud-summary-reason {
+      font-size: 16px;
+      opacity: 0.9;
+    }
+    .hud-summary-stats {
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+      font-size: 18px;
+    }
+    .hud-summary-goals {
+      font-size: 14px;
+      opacity: 0.8;
+    }
     @keyframes hud-doom-flash {
       0% { opacity: 1; }
       50% { opacity: 0.25; }
@@ -107,6 +170,20 @@ export class Hud {
   private readonly gold: HTMLDivElement;
   private readonly stockpile: HTMLDivElement;
   private readonly villagers: HTMLDivElement;
+  private readonly debugPanel: HTMLDivElement;
+  private readonly debugVillagers: HTMLDivElement;
+  private readonly debugMonsters: HTMLDivElement;
+  private readonly debugGatherers: HTMLDivElement;
+  private readonly debugChasing: HTMLDivElement;
+  private readonly debugStockpile: HTMLDivElement;
+  private readonly summaryOverlay: HTMLDivElement;
+  private readonly summaryTitle: HTMLDivElement;
+  private readonly summaryReason: HTMLDivElement;
+  private readonly summaryStats: HTMLDivElement;
+  private readonly summaryTime: HTMLDivElement;
+  private readonly summaryVillagers: HTMLDivElement;
+  private readonly summaryResources: HTMLDivElement;
+  private readonly summaryGoals: HTMLDivElement;
 
   constructor(container: HTMLElement) {
     ensureHudStyles();
@@ -147,6 +224,39 @@ export class Hud {
 
     this.root.append(this.doomClock, this.darkEnergy, this.gold, this.stockpile, this.villagers);
     container.appendChild(this.root);
+
+    this.debugPanel = document.createElement('div');
+    this.debugPanel.classList.add('hud-debug-panel');
+    this.debugVillagers = document.createElement('div');
+    this.debugMonsters = document.createElement('div');
+    this.debugGatherers = document.createElement('div');
+    this.debugChasing = document.createElement('div');
+    this.debugStockpile = document.createElement('div');
+    this.debugPanel.append(
+      this.debugVillagers,
+      this.debugMonsters,
+      this.debugGatherers,
+      this.debugChasing,
+      this.debugStockpile,
+    );
+    container.appendChild(this.debugPanel);
+
+    this.summaryOverlay = document.createElement('div');
+    this.summaryOverlay.classList.add('hud-summary-overlay');
+    this.summaryTitle = document.createElement('div');
+    this.summaryTitle.classList.add('hud-summary-title');
+    this.summaryReason = document.createElement('div');
+    this.summaryReason.classList.add('hud-summary-reason');
+    this.summaryStats = document.createElement('div');
+    this.summaryStats.classList.add('hud-summary-stats');
+    this.summaryTime = document.createElement('div');
+    this.summaryVillagers = document.createElement('div');
+    this.summaryResources = document.createElement('div');
+    this.summaryStats.append(this.summaryTime, this.summaryVillagers, this.summaryResources);
+    this.summaryGoals = document.createElement('div');
+    this.summaryGoals.classList.add('hud-summary-goals');
+    this.summaryOverlay.append(this.summaryTitle, this.summaryReason, this.summaryStats, this.summaryGoals);
+    container.appendChild(this.summaryOverlay);
   }
 
   update(snapshot: RenderSnapshot): void {
@@ -188,5 +298,38 @@ export class Hud {
     this.gold.textContent = `Gold: ${snapshot.hud.gold.toFixed(0)}`;
     this.stockpile.textContent = `Stockpile: ${snapshot.hud.resourceStockpile.toFixed(1)}`;
     this.villagers.textContent = `Villagers: ${snapshot.hud.villagerCount.toFixed(0)} / ${snapshot.hud.villagerCapacity.toFixed(0)} (${snapshot.hud.villageMood})`;
+
+    this.debugVillagers.textContent = `Villagers: ${snapshot.debug.villagerCount}`;
+    this.debugMonsters.textContent = `Monsters: ${snapshot.debug.monsterCount}`;
+    this.debugGatherers.textContent = `Active Gatherers: ${snapshot.debug.activeGatherers}`;
+    this.debugChasing.textContent = `Monsters Chasing: ${snapshot.debug.monstersChasingVillagers}`;
+    this.debugStockpile.textContent = `Stockpile: ${snapshot.debug.resourceStockpile.toFixed(1)}`;
+
+    const run = snapshot.run;
+    const goalParts: string[] = [];
+    if (run.surviveGoalSeconds > 0) {
+      goalParts.push(`Survive ${formatClock(Math.max(0, Math.round(run.surviveGoalSeconds)))}`);
+    }
+    if (run.resourceGoal > 0) {
+      goalParts.push(`Gather ${run.resourceGoal.toFixed(0)} resources`);
+    }
+    this.summaryGoals.textContent = goalParts.length > 0 ? `Goals: ${goalParts.join(' or ')}` : '';
+
+    if (run.status === 'running') {
+      this.summaryOverlay.classList.remove('hud-summary-overlay--visible');
+    } else {
+      this.summaryOverlay.classList.add('hud-summary-overlay--visible');
+      this.summaryTitle.textContent = run.status === 'won' ? 'Victory' : 'Defeat';
+      this.summaryTitle.style.color = run.status === 'won' ? '#a5d6a7' : '#ef9a9a';
+      const reasonText =
+        run.reason ??
+        (run.status === 'won' ? 'You survived the onslaught.' : 'The village has fallen.');
+      this.summaryReason.textContent = reasonText;
+      const survivedSeconds = Math.max(0, Math.round(run.timeSurvivedSeconds));
+      this.summaryTime.textContent = `Time Survived: ${formatClock(survivedSeconds)}`;
+      this.summaryVillagers.textContent = `Villagers Born: ${run.villagersBorn}`;
+      const resourceGoalSuffix = run.resourceGoal > 0 ? ` / ${run.resourceGoal.toFixed(0)}` : '';
+      this.summaryResources.textContent = `Resources Gathered: ${run.resourcesGathered.toFixed(0)}${resourceGoalSuffix}`;
+    }
   }
 }

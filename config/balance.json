@@ -207,5 +207,9 @@
     },
     "showGrid": true,
     "showPathDebug": false
+  },
+  "victory": {
+    "surviveMinutes": 3,
+    "resourceGoal": 120
   }
 }

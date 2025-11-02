@@ -45,6 +45,27 @@ export interface DarkEnergyHudView {
   markers: DarkEnergyMarkerView[];
 }
 
+export type RunCompletion = 'survival' | 'resource' | 'extinction' | null;
+
+export interface RunSummaryView {
+  status: 'running' | 'won' | 'lost';
+  timeSurvivedSeconds: number;
+  villagersBorn: number;
+  resourcesGathered: number;
+  surviveGoalSeconds: number;
+  resourceGoal: number;
+  completedCondition: RunCompletion;
+  reason: string | null;
+}
+
+export interface DebugOverlayView {
+  villagerCount: number;
+  monsterCount: number;
+  activeGatherers: number;
+  monstersChasingVillagers: number;
+  resourceStockpile: number;
+}
+
 export interface HudState {
   doomClockSeconds: number;
   darkEnergy: DarkEnergyHudView;
@@ -62,4 +83,6 @@ export interface RenderSnapshot {
   entities: RenderEntity[];
   floating: FloatingNumberView[];
   hud: HudState;
+  run: RunSummaryView;
+  debug: DebugOverlayView;
 }

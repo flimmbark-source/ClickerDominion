@@ -1,7 +1,7 @@
 import type { BalanceConfig, MonsterKind, ResourceType } from '../logic/balance';
 import { createIntentState, type IntentState, type AbilityIntent, type ClickIntent } from '../logic/intents';
 import type { GameEventMessage } from '../logic/events/GameEvents';
-import type { RenderSnapshot } from '../render/state';
+import type { RenderSnapshot, RunCompletion } from '../render/state';
 import { RNG } from '../utils/rng';
 import { EntityManager } from '../logic/simulation/EntityManager';
 import { Village, Villager, type TilePosition } from '../logic/simulation/entities';
@@ -88,6 +88,18 @@ export interface World {
   };
   entityManager: EntityManager;
   monsterSpawner: MonsterSpawnerState;
+  stats: {
+    villagersBorn: number;
+    resourcesGathered: number;
+  };
+  runState: {
+    status: 'running' | 'won' | 'lost';
+    reason: string | null;
+    completedCondition: RunCompletion;
+    finalTimeSeconds: number;
+    endTick: number | null;
+    populationEverPositive: boolean;
+  };
 }
 
 export function createGrid(width: number, height: number): GridState {
@@ -127,6 +139,23 @@ function baseRenderSnapshot(): RenderSnapshot {
       resourceStockpile: 0,
       villageMood: 'normal',
     },
+    run: {
+      status: 'running',
+      timeSurvivedSeconds: 0,
+      villagersBorn: 0,
+      resourcesGathered: 0,
+      surviveGoalSeconds: 0,
+      resourceGoal: 0,
+      completedCondition: null,
+      reason: null,
+    },
+    debug: {
+      villagerCount: 0,
+      monsterCount: 0,
+      activeGatherers: 0,
+      monstersChasingVillagers: 0,
+      resourceStockpile: 0,
+    },
   };
 }
 
@@ -157,6 +186,18 @@ export function createWorld(balance: BalanceConfig): World {
       baseIntervalTicks: baseSpawnIntervalTicks,
       minIntervalTicks: minSpawnIntervalTicks,
       wavesSpawned: 0,
+    },
+    stats: {
+      villagersBorn: 0,
+      resourcesGathered: 0,
+    },
+    runState: {
+      status: 'running',
+      reason: null,
+      completedCondition: null,
+      finalTimeSeconds: 0,
+      endTick: null,
+      populationEverPositive: balance.villages.initial.population > 0,
     },
   };
 
@@ -394,6 +435,8 @@ export function spawnVillager(world: World, villageEntity: Entity): Entity | nul
 
   world.components.villagers.set(entity, villager);
   world.entityManager.registerVillager(entity, villageEntity);
+  world.stats.villagersBorn += 1;
+  world.runState.populationEverPositive = true;
   return entity;
 }
 
