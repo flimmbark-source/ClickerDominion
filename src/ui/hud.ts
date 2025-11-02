@@ -1,4 +1,5 @@
 import type { RenderSnapshot } from '../render/state';
+import { reportCheckPass, reportCheckFail } from '../utils/checks';
 
 const HUD_STYLE_ID = 'clicker-dominion-hud-style';
 
@@ -170,6 +171,8 @@ export class Hud {
   private readonly gold: HTMLDivElement;
   private readonly stockpile: HTMLDivElement;
   private readonly villagers: HTMLDivElement;
+  private readonly townsAlive: HTMLDivElement;
+  private readonly nextWave: HTMLDivElement;
   private readonly debugPanel: HTMLDivElement;
   private readonly debugVillagers: HTMLDivElement;
   private readonly debugMonsters: HTMLDivElement;
@@ -222,7 +225,21 @@ export class Hud {
     this.villagers = document.createElement('div');
     this.villagers.style.fontSize = '18px';
 
-    this.root.append(this.doomClock, this.darkEnergy, this.gold, this.stockpile, this.villagers);
+    this.townsAlive = document.createElement('div');
+    this.townsAlive.style.fontSize = '18px';
+
+    this.nextWave = document.createElement('div');
+    this.nextWave.style.fontSize = '18px';
+
+    this.root.append(
+      this.doomClock,
+      this.darkEnergy,
+      this.gold,
+      this.stockpile,
+      this.villagers,
+      this.townsAlive,
+      this.nextWave,
+    );
     container.appendChild(this.root);
 
     this.debugPanel = document.createElement('div');
@@ -298,6 +315,15 @@ export class Hud {
     this.gold.textContent = `Gold: ${snapshot.hud.gold.toFixed(0)}`;
     this.stockpile.textContent = `Stockpile: ${snapshot.hud.resourceStockpile.toFixed(1)}`;
     this.villagers.textContent = `Villagers: ${snapshot.hud.villagerCount.toFixed(0)} / ${snapshot.hud.villagerCapacity.toFixed(0)} (${snapshot.hud.villageMood})`;
+    const townsAliveValue = snapshot.hud.townsAlive;
+    const nextWaveSeconds = Math.max(0, snapshot.hud.nextWaveSeconds);
+    if (!Number.isFinite(townsAliveValue) || !Number.isFinite(nextWaveSeconds)) {
+      reportCheckFail('hudDisplays', 'Invalid towns alive or next wave value');
+    } else {
+      this.townsAlive.textContent = `Towns Alive: ${Math.max(0, Math.floor(townsAliveValue))}`;
+      this.nextWave.textContent = `Next Wave In: ${formatClock(nextWaveSeconds)}`;
+      reportCheckPass('hudDisplays', `Towns ${Math.max(0, Math.floor(townsAliveValue))}, next wave ${formatClock(nextWaveSeconds)}`);
+    }
 
     this.debugVillagers.textContent = `Villagers: ${snapshot.debug.villagerCount}`;
     this.debugMonsters.textContent = `Monsters: ${snapshot.debug.monsterCount}`;

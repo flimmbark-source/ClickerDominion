@@ -76,6 +76,8 @@ export interface HudState {
   villagerCapacity: number;
   resourceStockpile: number;
   villageMood: VillageMood;
+  townsAlive: number;
+  nextWaveSeconds: number;
 }
 
 export interface RenderSnapshot {
