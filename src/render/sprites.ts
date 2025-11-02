@@ -61,7 +61,7 @@ const SPRITE_SOURCES: Record<SpriteId, SpriteSource> = {
     anchorYRatio: 1,
   },
   town: {
-    src: '/assets/entities/Village.png',
+    src: '/assets/entities/village.png',
     anchorXRatio: 0.443359375,
     anchorYRatio: 1,
   },

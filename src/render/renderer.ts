@@ -163,11 +163,12 @@ export class Renderer {
       drawX += (Math.random() - 0.5) * 4;
       drawY += (Math.random() - 0.5) * 4;
     }
-    const sizeW = balance.iso.tileWidth / 2;
-    const sizeH = balance.iso.tileHeight / 2;
+    const entityScale = 0.5;
+    const sizeW = (balance.iso.tileWidth / 2) * entityScale;
+    const sizeH = (balance.iso.tileHeight / 2) * entityScale;
     const frame = this.atlas[entity.spriteId];
     if (frame) {
-      const maxWidth = balance.iso.tileWidth;
+      const maxWidth = balance.iso.tileWidth * entityScale;
       const scale = Math.min(1, maxWidth / frame.sw);
       const drawWidth = frame.sw * scale;
       const drawHeight = frame.sh * scale;

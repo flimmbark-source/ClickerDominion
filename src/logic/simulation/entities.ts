@@ -245,6 +245,7 @@ export class Villager {
   pendingRestTicks = 0;
   threatCloseCounter = 0;
   lastThreatDistance: number | null = null;
+  fleeMoveBudget = 0;
 
   constructor(params: VillagerParameters) {
     this.entityId = params.entityId;
@@ -306,6 +307,7 @@ export class Villager {
       this.stopPanic();
     }
     this.resetThreatTracking();
+    this.fleeMoveBudget = 0;
     this.state = { type: 'fleeing', path: [...path] };
   }
 
