@@ -12,6 +12,24 @@ export interface ResourceComponent {
   amount: number;
 }
 
+export interface PositionComponent {
+  x: number;
+  y: number;
+}
+
+export type VillagerTaskIntentType = 'gather' | 'gathering' | 'return';
+
+export interface TaskIntentComponent {
+  type: VillagerTaskIntentType;
+  targetTile: TilePosition | null;
+  resourceId?: Entity;
+}
+
+export interface InventoryComponent {
+  resourceType: ResourceNodeType;
+  amount: number;
+}
+
 export interface Transform {
   tileX: number;
   tileY: number;
@@ -123,11 +141,14 @@ export interface MilitiaState {
 }
 
 export type ComponentStores = {
+  positions: Map<Entity, PositionComponent>;
   transforms: Map<Entity, Transform>;
   renderIso: Map<Entity, RenderIso>;
   health: Map<Entity, Health>;
   clickable: Set<Entity>;
   resource: Map<Entity, ResourceComponent>;
+  taskIntents: Map<Entity, TaskIntentComponent>;
+  inventories: Map<Entity, InventoryComponent>;
   monster: Map<Entity, MonsterTag>;
   monsterState: Map<Entity, MonsterState>;
   hero: Set<Entity>;
@@ -148,11 +169,14 @@ export type ComponentStores = {
 
 export function createComponentStores(): ComponentStores {
   return {
+    positions: new Map(),
     transforms: new Map(),
     renderIso: new Map(),
     health: new Map(),
     clickable: new Set(),
     resource: new Map(),
+    taskIntents: new Map(),
+    inventories: new Map(),
     monster: new Map(),
     monsterState: new Map(),
     hero: new Set(),
